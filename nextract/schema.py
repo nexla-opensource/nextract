@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional, Type, Union
+import copy
 
 from pydantic import BaseModel, TypeAdapter
 from pydantic_ai import StructuredDict
@@ -34,6 +35,13 @@ def augment_schema_with_extra(schema: JsonSchema, include_extra: bool) -> JsonSc
     base_props = schema.get("properties", {})
     if isinstance(base_props, dict):
         new_schema["properties"] = dict(base_props)
+    # Preserve standard JSON Schema top-level fields used for resolution/semantics
+    if "$schema" in schema:
+        new_schema["$schema"] = schema["$schema"]
+    if "$id" in schema:
+        new_schema["$id"] = schema["$id"]
+    if "$defs" in schema and isinstance(schema["$defs"], dict):
+        new_schema["$defs"] = dict(schema["$defs"])  # keep refs like #/$defs/foo working
     # Add extra bag
     new_schema["properties"]["extra"] = {
         "type": "object",
@@ -55,7 +63,9 @@ def build_output_type(
         return schema_or_model  # a BaseModel subclass
     # else: JSON schema path
     schema = augment_schema_with_extra(schema_or_model, include_extra)
-    return StructuredDict(schema, name=schema.get("title", "Output"))
+    # Inline local $ref references to avoid issues with Pydantic's schema generator
+    schema_inlined = _inline_local_refs(schema)
+    return StructuredDict(schema_inlined, name=schema_inlined.get("title", "Output"))
 
 def cast_to_pydantic(model_type: PydModelType, data: dict[str, Any]) -> BaseModel:
     # Fast conversion using the model itself
@@ -63,3 +73,31 @@ def cast_to_pydantic(model_type: PydModelType, data: dict[str, Any]) -> BaseMode
 
 def cast_to_dict_from_pydantic(obj: BaseModel) -> dict[str, Any]:
     return obj.model_dump()
+
+
+def _inline_local_refs(schema: JsonSchema) -> JsonSchema:
+    """Return a deep-copied schema with local $refs (e.g. "#/$defs/foo") inlined.
+
+    This helps interop with Pydantic's JSON schema generator used by pydantic-ai,
+    which expects fully-resolved definitions for arbitrary $refs in literal schemas.
+    """
+    defs = schema.get("$defs", {})
+    if not isinstance(defs, dict):
+        defs = {}
+
+    def resolve(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            # If this object is a pure $ref, inline the referenced def
+            ref = obj.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/") and len(obj) == 1:
+                key = ref.split("/")[-1]
+                target = defs.get(key)
+                if isinstance(target, dict):
+                    return resolve(copy.deepcopy(target))
+            # Otherwise, recurse into children
+            return {k: resolve(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [resolve(v) for v in obj]
+        return obj
+
+    return resolve(copy.deepcopy(schema))

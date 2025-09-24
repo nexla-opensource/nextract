@@ -1,16 +1,119 @@
+############################################
+# Python/Poetry project .gitignore
+# Covers common Python, packaging, tooling,
+# local env, and editor/OS artifacts.
+############################################
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
-.pytest_cache/
-.venv/
-*.pyc
-*.pyo
-*.pyd
-*.egg-info/
-dist/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
 build/
-.DS_Store
-.idea/
-.vscode/
+dist/
+wheels/
+downloads/
+develop-eggs/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+lib/
+lib64/
+share/python-wheels/
+.installed.cfg
+*.egg-info/
+*.egg
+MANIFEST
+pip-wheel-metadata/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Logs
 *.log
-coverage.xml
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+.cache
+.coverage
 .coverage*
+coverage.xml
+nosetests.xml
+*.cover
+*.py,cover
+.hypothesis/
+cover/
+.benchmarks/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.pyrightcache/
+
+# Ruff
+.ruff_cache/
+
+# Jupyter / IPython
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+__pypackages__/
+.direnv/
+.envrc
+
+# dotenv files (keep templates like .env.example tracked)
+.env
+.env.local
+.env.*.local
+
+# Databases
+*.sqlite
 *.sqlite3
+
+# Documentation
+docs/_build/
+site/
+
+# Editors / IDEs
+.vscode/
+.idea/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# pyenv
+.python-version
+
+# Others
+.pybuilder/
+target/
+.scrapy/
+cython_debug/
+.ropeproject/
+.spyderproject
+.spyproject/

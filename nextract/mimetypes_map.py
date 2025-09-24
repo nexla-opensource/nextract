@@ -22,7 +22,8 @@ _CUSTOM: dict[str, str] = {
 }
 
 _TEXTUAL_EXTS = {
-    ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".html", ".htm"
+    ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".html", ".htm",
+    ".xls", ".xlsx",
 }
 
 _IMAGE_EXTS = {
@@ -34,7 +35,8 @@ _PDF_EXTS = {".pdf"}
 _ZIP_EXTS = {".zip"}
 
 _UNSUPPORTED_BUT_ACCEPTABLE_AS_BINARY = {
-    ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"
+    # Office documents that we convert to PDF before sending to LLMs
+    ".doc", ".docx", ".ppt", ".pptx",
 }
 
 def guess_mime(path: Path) -> str:
