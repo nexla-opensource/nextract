@@ -1,0 +1,72 @@
+name: Release to PyPI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write  # Required for trusted publishing
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build
+
+    - name: Set version from release tag
+      shell: bash
+      run: |
+        TAG_NAME="${{ github.event.release.tag_name || github.ref_name }}"
+        VERSION="${TAG_NAME#v}"
+        echo "Release tag: ${TAG_NAME} -> Version: ${VERSION}"
+        if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(.*)?$ ]]; then
+          echo "Error: tag '${TAG_NAME}' does not look like a version (e.g. v0.1.1 or 0.1.1)" >&2
+          exit 1
+        fi
+        export VERSION
+        python - << 'PY'
+import os, re, sys, pathlib
+version = os.environ.get('VERSION')
+if not version:
+    print('VERSION env var not set', file=sys.stderr)
+    sys.exit(1)
+p = pathlib.Path('pyproject.toml')
+text = p.read_text()
+new_text, n = re.subn(r'(?m)^(version\s*=\s*)"[^"]*"', f'\\1"{version}"', text, count=1)
+if n == 0:
+    print('No version field found to update in pyproject.toml', file=sys.stderr)
+    sys.exit(1)
+p.write_text(new_text)
+print(f'pyproject.toml version updated to {version}')
+PY
+
+    - name: Build package
+      run: |
+        python -m build
+
+    - name: Verify build contents
+      run: |
+        echo "=== Built packages ==="
+        ls -la dist/
+        echo "=== Checking wheel contents ==="
+        python -m zipfile -l dist/*.whl | head -20
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        verbose: true

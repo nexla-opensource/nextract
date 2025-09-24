@@ -91,14 +91,16 @@
 ## Installation
 
 ```bash
-# with Poetry
-poetry add nextract
-
-# or with pip
+# Install from PyPI
 pip install nextract
+
+# Or install from source for development
+git clone https://github.com/your-username/nextract.git
+cd nextract
+pip install -e .[dev]
 ```
 
-> **Python**: 3.11+
+> **Python**: 3.10+
 
 ---
 
@@ -438,6 +440,42 @@ A: This build sends raw text or binary bytes directly to the Agent. If you need 
 
 **Q: Can I get a Pydantic model out?**
 A: Yes—pass your model class to `schema_or_model` and set `return_pydantic=True`.
+
+---
+
+## Development
+
+### Building & Testing
+
+```bash
+# Install development dependencies
+pip install -e .[dev]
+
+# Run tests
+pytest
+
+# Run linting
+ruff check nextract
+
+# Build package
+python -m build
+
+# Test installation
+pip install dist/*.whl
+```
+
+### CI/CD
+
+This project uses GitHub Actions for continuous integration and automated PyPI publishing:
+
+- **CI**: Runs on every push/PR, testing across Python 3.10-3.12
+- **Release**: Automatically publishes to PyPI when GitHub releases are created
+- **Versioning**: Managed statically in `pyproject.toml` (current: `0.0.1`)
+
+### Creating a Release
+
+1. Bump `version` in `pyproject.toml`, commit, and push.
+2. Create a GitHub release (with notes) — this triggers automatic PyPI publishing.
 
 ---
 
