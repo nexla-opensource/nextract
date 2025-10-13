@@ -37,6 +37,7 @@ def cli_extract(
     examples_file: Optional[Path] = typer.Option(None, "--examples", "-e", help="Optional JSON file with list of examples"),
     include_extra: bool = typer.Option(False, "--include-extra", help="Include `extra` bag for out-of-schema fields (JSON Schema mode)"),
     return_pydantic: bool = typer.Option(False, "--return-pydantic", help="Return Pydantic instance when --pydantic-model is used"),
+    model: Optional[str] = typer.Option(None, "--model", help="Provider model string, e.g. 'openai:gpt-4o' (overrides NEXTRACT_MODEL)"),
 ) -> None:
     """Extract structured data from one or more files (processed together in a single run)."""
     if (schema is None) == (pydantic_model is None):
@@ -53,6 +54,7 @@ def cli_extract(
             examples=examples,
             include_extra=include_extra,
             return_pydantic=False,
+            model=model,
         )
     else:
         model_type = _load_pydantic_model(pydantic_model)  # type: ignore[arg-type]
@@ -63,6 +65,7 @@ def cli_extract(
             examples=examples,
             include_extra=False,  # n/a for model mode
             return_pydantic=return_pydantic,
+            model=model,
         )
     print_json(data=result)
 
@@ -76,6 +79,7 @@ def cli_batch(
     include_extra: bool = typer.Option(False, "--include-extra"),
     return_pydantic: bool = typer.Option(False, "--return-pydantic"),
     max_concurrency: int = typer.Option(4, "--max-concurrency", "-c"),
+    model: Optional[str] = typer.Option(None, "--model", help="Provider model string, e.g. 'openai:gpt-4o' (overrides NEXTRACT_MODEL)"),
 ) -> None:
     """Process each file independently in parallel (one run per file)."""
     if (schema is None) == (pydantic_model is None):
@@ -96,6 +100,7 @@ def cli_batch(
             include_extra=include_extra,
             return_pydantic=False,
             max_concurrency=max_concurrency,
+            model=model,
         )
     else:
         model_type = _load_pydantic_model(pydantic_model)  # type: ignore[arg-type]
@@ -107,5 +112,6 @@ def cli_batch(
             include_extra=False,
             return_pydantic=return_pydantic,
             max_concurrency=max_concurrency,
+            model=model,
         )
     print_json(data=result)

@@ -7,8 +7,8 @@ from pydantic import BaseModel
 
 from .config import load_runtime_config, RuntimeConfig
 from .logging import setup_logging
-from .agent_runner import run_extraction_async, ExtractionReport
-from .schema import JsonSchema, PydModelType, is_pydantic_model
+from .agent_runner import run_extraction_async, run_improvement_async
+from .schema import JsonSchema, is_pydantic_model, to_json_schema
 
 def extract(
     files: Sequence[str],
@@ -18,11 +18,12 @@ def extract(
     examples: Optional[Sequence[dict | tuple[Optional[str], dict]]] = None,
     include_extra: bool = False,
     return_pydantic: bool = False,
+    model: Optional[str] = None,
     config: Optional[RuntimeConfig] = None,
     setup_logs: bool = True,
-) -> dict[str, Any]:
+)-> dict[str, Any]:
     """Synchronous convenience wrapper.
-    Returns a dict with keys: data, report (usage+cost), model, files.
+    Returns a dict with keys: data, report (model, files, usage, cost_estimate_usd, warnings).
 
     - If a Pydantic model class is passed and return_pydantic=True, `data` will be that model instance;
       otherwise `data` is a dict (Pydantic models are .model_dump()).
@@ -31,6 +32,16 @@ def extract(
         setup_logging()
 
     cfg = config or load_runtime_config()
+    # If a model is explicitly provided, it overrides env/config
+    if model is not None:
+        cfg = RuntimeConfig(
+            model=model,
+            max_concurrency=cfg.max_concurrency,
+            max_run_retries=cfg.max_run_retries,
+            per_call_timeout_secs=cfg.per_call_timeout_secs,
+            pricing_json=cfg.pricing_json,
+            max_validation_rounds=cfg.max_validation_rounds,
+        )
 
     data, report = asyncio.run(
         run_extraction_async(
@@ -107,8 +118,10 @@ def batch_extract(
     user_prompt: Optional[str] = None,
     examples: Optional[Sequence[dict | tuple[Optional[str], dict]]] = None,
     include_extra: bool = False,
+    provide_improvements: bool = False,
     return_pydantic: bool = False,
     max_concurrency: Optional[int] = None,
+    model: Optional[str] = None,
     config: Optional[RuntimeConfig] = None,
     setup_logs: bool = True,
 ) -> dict[str, Any]:
@@ -121,6 +134,17 @@ def batch_extract(
     if setup_logs:
         setup_logging()
     cfg = config or load_runtime_config()
+    # Apply explicit model override if provided
+    if model is not None:
+        cfg = RuntimeConfig(
+            model=model,
+            max_concurrency=cfg.max_concurrency,
+            max_run_retries=cfg.max_run_retries,
+            per_call_timeout_secs=cfg.per_call_timeout_secs,
+            pricing_json=cfg.pricing_json,
+            max_validation_rounds=cfg.max_validation_rounds,
+        )
+    # Apply explicit concurrency override if provided
     if max_concurrency is not None:
         cfg = RuntimeConfig(
             model=cfg.model,
@@ -128,7 +152,11 @@ def batch_extract(
             max_run_retries=cfg.max_run_retries,
             per_call_timeout_secs=cfg.per_call_timeout_secs,
             pricing_json=cfg.pricing_json,
+            max_validation_rounds=cfg.max_validation_rounds,
         )
+    # If improvements are requested, ensure extra collection is enabled
+    if provide_improvements:
+        include_extra = True
 
     async def runner() -> dict[str, Any]:
         sem = asyncio.Semaphore(cfg.max_concurrency)
@@ -152,4 +180,39 @@ def batch_extract(
         await asyncio.gather(*tasks)
         return results
 
-    return asyncio.run(runner())
+    results = asyncio.run(runner())
+
+    if not provide_improvements:
+        return results
+
+    # Build improvement payload
+    schema_json = to_json_schema(schema_or_model)
+    batch_data: list[dict[str, Any]] = []
+    for _, res in results.items():
+        d = res.get("data")
+        if hasattr(d, "model_dump"):
+            try:
+                d = d.model_dump()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        if isinstance(d, dict):
+            batch_data.append(d)
+        else:
+            batch_data.append({"value": d})
+
+    improvements = asyncio.run(
+        run_improvement_async(
+            config=cfg,
+            current_schema=schema_json,
+            user_prompt=user_prompt,
+            batch_results=batch_data,
+        )
+    )
+
+    # Attach improvement outputs alongside results
+    results_out: dict[str, Any] = {
+        "results": results,
+        "improved_schema": improvements.get("improved_schema"),
+        "improved_user_prompt": improvements.get("improved_user_prompt"),
+    }
+    return results_out

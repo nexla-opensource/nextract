@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Type, Union
+from typing import Any, Type, Union
 import copy
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 from pydantic_ai import StructuredDict
 
 JsonSchema = dict[str, Any]
@@ -101,3 +101,11 @@ def _inline_local_refs(schema: JsonSchema) -> JsonSchema:
         return obj
 
     return resolve(copy.deepcopy(schema))
+
+def to_json_schema(schema_or_model: Union[JsonSchema, PydModelType]) -> JsonSchema:
+    """Return a JSON Schema dict for either a literal schema or a Pydantic model type."""
+    if is_pydantic_model(schema_or_model):
+        # BaseModel subclass → JSON Schema (inline local refs for downstream consumers)
+        schema = schema_or_model.model_json_schema()  # type: ignore[union-attr]
+        return _inline_local_refs(schema)
+    return schema_or_model

@@ -14,7 +14,11 @@ class ModelPricing:
 def parse_pricing_json(json_str: str) -> dict[str, ModelPricing]:
     if not json_str:
         return {}
-    raw = json.loads(json_str)
+    try:
+        raw = json.loads(json_str)
+    except Exception:
+        # Invalid pricing JSON; ignore gracefully
+        return {}
     out: dict[str, ModelPricing] = {}
     for model, entry in raw.items():
         try:

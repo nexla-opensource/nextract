@@ -42,3 +42,22 @@ def combine_system_prompt(user_hint: Optional[str], include_extra: bool, example
     if examples_block:
         base = base + f"\n\n{examples_block}"
     return base
+
+def build_improvement_system_prompt(schema_json: dict[str, Any], user_hint: Optional[str]) -> str:
+    base = (
+        "You are an assistant that improves a JSON Schema and user prompt for a data extraction task.\n"
+        "Given the CURRENT SCHEMA and USER PROMPT and a set of extraction RESULTS, propose:\n"
+        "1) an improved JSON Schema (Draft 2020-12) that better fits the observed data, and\n"
+        "2) an improved user prompt with clearer, more actionable guidance.\n\n"
+        "Constraints:\n"
+        "- Preserve field semantics; correct obvious types and add useful descriptions/formats.\n"
+        "- If many RESULTS include consistent keys under an `extra` bag, promote those to top-level schema fields.\n"
+        "- Keep `type`, `properties`, and `required` accurate; avoid provider-specific extensions.\n"
+        "- Do not invent fields not supported by RESULTS/content.\n\n"
+        "Return only the structured object requested."
+    )
+    schema_block = json.dumps(schema_json, ensure_ascii=False)
+    if user_hint:
+        base += f"\n\nCURRENT USER PROMPT:\n{user_hint.strip()}"
+    base += f"\n\nCURRENT SCHEMA (JSON):\n{schema_block}"
+    return base

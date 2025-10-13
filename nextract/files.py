@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import os
 import zipfile
 from dataclasses import dataclass
@@ -10,7 +9,7 @@ import shutil
 import xml.etree.ElementTree as ET
 import re
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import Iterable, Sequence
 
 from pydantic_ai import BinaryContent
 from .mimetypes_map import guess_mime, is_textual, is_pdf, is_image, is_zip, is_office_binary
@@ -72,7 +71,7 @@ def _convert_office_to_pdf(path: Path) -> Path | None:
             if target_pdf.exists():
                 return target_pdf
             else:
-                log.warning(
+                log.debug(
                     "office_pdf_conversion_no_output",
                     tool="soffice",
                     returncode=res.returncode,
@@ -81,7 +80,7 @@ def _convert_office_to_pdf(path: Path) -> Path | None:
                     file=str(path),
                 )
         except Exception as e:  # noqa: BLE001
-            log.warning("office_pdf_conversion_exception", tool="soffice", error=str(e), file=str(path))
+            log.debug("office_pdf_conversion_exception", tool="soffice", error=str(e), file=str(path))
 
     unoconv = _which("unoconv")
     if unoconv:
@@ -91,7 +90,7 @@ def _convert_office_to_pdf(path: Path) -> Path | None:
             if target_pdf.exists():
                 return target_pdf
             else:
-                log.warning(
+                log.debug(
                     "office_pdf_conversion_no_output",
                     tool="unoconv",
                     returncode=res.returncode,
@@ -100,7 +99,7 @@ def _convert_office_to_pdf(path: Path) -> Path | None:
                     file=str(path),
                 )
         except Exception as e:  # noqa: BLE001
-            log.warning("office_pdf_conversion_exception", tool="unoconv", error=str(e), file=str(path))
+            log.debug("office_pdf_conversion_exception", tool="unoconv", error=str(e), file=str(path))
 
     # Failed all methods
     return None
@@ -255,7 +254,7 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
                 except UnicodeDecodeError:
                     return produced[0].read_text(encoding="latin-1", errors="replace")
             else:
-                log.warning(
+                log.debug(
                     "xls_csv_no_output",
                     tool="soffice",
                     returncode=res.returncode,
@@ -264,7 +263,7 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
                     file=str(path),
                 )
         except Exception as e:  # noqa: BLE001
-            log.warning("xls_csv_exception", tool="soffice", error=str(e), file=str(path))
+            log.debug("xls_csv_exception", tool="soffice", error=str(e), file=str(path))
 
     unoconv = _which("unoconv")
     if unoconv:
@@ -278,7 +277,7 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
                 except UnicodeDecodeError:
                     return produced[0].read_text(encoding="latin-1", errors="replace")
             else:
-                log.warning(
+                log.debug(
                     "xls_csv_no_output",
                     tool="unoconv",
                     returncode=res.returncode,
@@ -287,11 +286,11 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
                     file=str(path),
                 )
         except Exception as e:  # noqa: BLE001
-            log.warning("xls_csv_exception", tool="unoconv", error=str(e), file=str(path))
+            log.debug("xls_csv_exception", tool="unoconv", error=str(e), file=str(path))
     return None
 
-def _prepare_single_file(path: Path) -> List[PreparedPart]:
-    parts: List[PreparedPart] = []
+def _prepare_single_file(path: Path) -> list[PreparedPart]:
+    parts: list[PreparedPart] = []
     mime = guess_mime(path)
 
     if is_textual(path):
@@ -300,7 +299,7 @@ def _prepare_single_file(path: Path) -> List[PreparedPart]:
             try:
                 text = _xlsx_to_text(path)
             except Exception as e:  # noqa: BLE001
-                log.warning("xlsx_text_extraction_failed", file=str(path), error=str(e))
+                log.debug("xlsx_text_extraction_failed", file=str(path), error=str(e))
                 # Fallback to raw bytes decode (not ideal)
                 text = _read_text_file(path)
             parts.append(PreparedPart(text=_wrap_text_payload(path, text, "text/tab-separated-values"), source_path=path))
@@ -313,7 +312,7 @@ def _prepare_single_file(path: Path) -> List[PreparedPart]:
                 return parts
             else:
                 # Last resort: attempt a lossy decode
-                log.warning("xls_text_extraction_fallback_raw_decode", file=str(path))
+                log.debug("xls_text_extraction_fallback_raw_decode", file=str(path))
                 text = _read_text_file(path)
                 parts.append(PreparedPart(text=_wrap_text_payload(path, text, "text/plain"), source_path=path))
                 return parts
@@ -337,7 +336,7 @@ def _prepare_single_file(path: Path) -> List[PreparedPart]:
                 parts.append(PreparedPart(binary=bc, source_path=path))
                 return parts
             except Exception as e:  # noqa: BLE001
-                log.warning("office_pdf_read_failed", file=str(pdf_path), error=str(e))
+                log.debug("office_pdf_read_failed", file=str(pdf_path), error=str(e))
         # Fallback: attach original binary if conversion failed
         log.warning("office_pdf_conversion_failed_fallback_binary", file=str(path))
         bc = BinaryContent(data=path.read_bytes(), media_type=mime)

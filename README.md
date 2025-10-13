@@ -197,18 +197,31 @@ print(res.keys())  # -> {"./a.pdf", "./b.png", "./c.txt"}
 
 ## CLI
 
+### `nextract extract` vs `nextract batch`
+
+**`nextract extract`** - Processes all files together in a single AI agent run:
+- Use when you want to extract information from multiple files as a cohesive unit
+- Returns one structured data object for all files combined
+- Example: Extract information from a contract and its amendments together
+
+**`nextract batch`** - Processes each file independently in parallel:
+- Use when you want to extract structured data from each file individually
+- Returns one result per file, keyed by filename
+- Faster for multiple files due to parallel processing (configurable concurrency)
+- Example: Extract invoice data from 100 separate invoice PDFs
+
 ```bash
-# JSON Schema
-nextract extract ./invoice.pdf \
+# JSON Schema - single extraction run
+nextract extract ./invoice.pdf ./amendment.pdf \
   --schema ./invoice.schema.json \
   --prompt "Extract the invoice fields." \
   --include-extra
 
-# Pydantic model (module:Class or module.Class)
+# Pydantic model (module:Class or module.Class) - single extraction run
 nextract extract ./invoice.pdf \
   --pydantic-model mypkg.models:Invoice
 
-# Batch (parallel): schema mode
+# Batch (parallel) - one extraction run per file
 nextract batch ./a.pdf ./b.png ./c.txt \
   --schema ./summary.schema.json \
   --prompt "Summarize each document." \
@@ -230,6 +243,7 @@ nextract batch ./a.pdf ./b.png ./c.txt \
 | `NEXTRACT_MAX_RUN_RETRIES`       | `5`             | Max retry attempts around Agent runs.               |
 | `NEXTRACT_PER_CALL_TIMEOUT_SECS` | `120`           | Per-call timeout in seconds.                        |
 | `NEXTRACT_PRICING`               | *(unset)*       | JSON map for cost estimation (see below).           |
+| `NEXTRACT_MAX_VALIDATION_ROUNDS` | `2`             | Max schema-enforced output validation retries.      |
 
 > Also set **provider credentials** as expected by Pydantic AI for your chosen provider.
 > Example: for OpenAI: `OPENAI_API_KEY=...`
@@ -249,13 +263,31 @@ This is used to compute `cost_estimate_usd` from the Agent’s token **usage**. 
 
 ### Model selection
 
-By default, `nextract` uses `openai:gpt-4o` (vision-capable). You can override per process:
+By default, `nextract` uses `openai:gpt-4o` (vision-capable). Choose a model by:
 
-```bash
-export NEXTRACT_MODEL="provider:model-id"
-```
+- Environment variable:
 
-Or in Python, construct and pass your own `RuntimeConfig` (advanced—optional).
+  ```bash
+  export NEXTRACT_MODEL="provider:model-id"
+  ```
+
+- Python argument override (takes precedence over env):
+
+  ```python
+  from nextract import extract, batch_extract
+
+  extract(["./invoice.pdf"], schema_or_model=my_schema, model="openai:gpt-4o")
+  batch_extract([["a.pdf"],["b.png"]], schema_or_model=my_schema, model="anthropic:claude-3-7-sonnet")
+  ```
+
+- CLI flag (takes precedence over env):
+
+  ```bash
+  nextract extract ./invoice.pdf --schema schema.json --model openai:gpt-4o
+  nextract batch ./a.pdf ./b.png --schema schema.json --model anthropic:claude-3-7-sonnet
+  ```
+
+You can still construct and pass a `RuntimeConfig` if you need to tune concurrency, retries, or timeouts.
 
 ---
 
