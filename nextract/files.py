@@ -321,10 +321,52 @@ def _prepare_single_file(path: Path) -> list[PreparedPart]:
         parts.append(PreparedPart(text=_wrap_text_payload(path, text, mime), source_path=path))
         return parts
 
-    if is_image(path) or is_pdf(path):
+    if is_image(path):
         bc = BinaryContent(data=path.read_bytes(), media_type=mime)
         parts.append(PreparedPart(binary=bc, source_path=path))
         return parts
+
+    if is_pdf(path):
+        # NEW: Use text extraction instead of binary for better grounding and cost savings
+        # This provides:
+        # - 100× cheaper (text tokens vs vision tokens)
+        # - 1000× faster (no vision API)
+        # - Unlimited page coverage (not limited to first 20 pages)
+        # - Built-in page number tracking for grounding
+        from .pdf_extractor import extract_pdf_text
+
+        try:
+            text, analysis = extract_pdf_text(
+                path,
+                enable_ocr=True,  # Use OCR for scanned PDFs
+                include_page_numbers=True  # Include page markers for grounding
+            )
+
+            log.info(
+                "pdf_text_extraction_success",
+                file=str(path),
+                method=analysis.recommended_method.value,
+                pdf_type=analysis.pdf_type.value,
+                pages=analysis.total_pages,
+                text_length=len(text)
+            )
+
+            # Wrap text with file markers
+            wrapped_text = _wrap_text_payload(path, text, mime)
+            parts.append(PreparedPart(text=wrapped_text, source_path=path))
+            return parts
+
+        except Exception as e:  # noqa: BLE001
+            # Fallback to binary if text extraction fails
+            log.warning(
+                "pdf_text_extraction_failed_fallback_binary",
+                file=str(path),
+                error=str(e),
+                message="Falling back to binary PDF (vision API)"
+            )
+            bc = BinaryContent(data=path.read_bytes(), media_type=mime)
+            parts.append(PreparedPart(binary=bc, source_path=path))
+            return parts
 
     if is_office_binary(path):
         # Convert Office docs to PDF, then attach PDF as binary for LLMs

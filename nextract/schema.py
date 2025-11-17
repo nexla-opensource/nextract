@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Type, Union
 import copy
+import structlog
 
 from pydantic import BaseModel
 from pydantic_ai import StructuredDict
+
+log = structlog.get_logger(__name__)
 
 JsonSchema = dict[str, Any]
 PydModelType = Type[BaseModel]
@@ -14,6 +17,86 @@ def is_pydantic_model(obj: Any) -> bool:
         return issubclass(obj, BaseModel)  # type: ignore[arg-type]
     except Exception:
         return False
+
+
+def validate_json_schema(schema: JsonSchema) -> None:
+    """
+    Validate that a JSON Schema is properly formatted.
+
+    Ensures:
+    - Schema has "type": "object" at the root
+    - Schema has "properties" dict
+    - Nested objects have proper structure
+
+    Raises:
+        ValueError: If schema is not properly formatted
+
+    Example of valid schema:
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "address": {
+                    "type": "object",
+                    "properties": {
+                        "street": {"type": "string"}
+                    }
+                }
+            }
+        }
+    """
+    if not isinstance(schema, dict):
+        raise ValueError("Schema must be a dictionary")
+
+    # Check root level
+    if "type" not in schema:
+        log.warning(
+            "json_schema_missing_type",
+            recommendation="Add 'type': 'object' to root schema"
+        )
+    elif schema.get("type") != "object":
+        raise ValueError(
+            f"Root schema must have 'type': 'object', got '{schema.get('type')}'"
+        )
+
+    if "properties" not in schema:
+        log.warning(
+            "json_schema_missing_properties",
+            recommendation="Add 'properties' dict to schema"
+        )
+        return
+
+    properties = schema.get("properties", {})
+    if not isinstance(properties, dict):
+        raise ValueError("Schema 'properties' must be a dictionary")
+
+    # Recursively validate nested objects
+    def validate_properties(props: dict, path: str = "") -> None:
+        for field_name, field_schema in props.items():
+            field_path = f"{path}.{field_name}" if path else field_name
+
+            if not isinstance(field_schema, dict):
+                log.warning(
+                    "json_schema_invalid_field",
+                    field=field_path,
+                    issue="Field schema must be a dict",
+                    recommendation=f"Use {{'type': 'string'}} instead of '{field_schema}'"
+                )
+                continue
+
+            # Check if it's a nested object
+            if field_schema.get("type") == "object":
+                if "properties" not in field_schema:
+                    log.warning(
+                        "json_schema_nested_object_missing_properties",
+                        field=field_path,
+                        recommendation="Add 'properties' dict to nested object"
+                    )
+                else:
+                    # Recurse into nested properties
+                    validate_properties(field_schema["properties"], field_path)
+
+    validate_properties(properties)
 
 def augment_schema_with_extra(schema: JsonSchema, include_extra: bool) -> JsonSchema:
     """Optionally add an 'extra' object bag to carry any additional fields detected.
@@ -58,11 +141,16 @@ def build_output_type(
 
     - If JSON Schema dict: return StructuredDict(schema) type
     - If Pydantic model type: return the model type as is
+
+    Validates JSON schemas to ensure proper structure.
     """
     if is_pydantic_model(schema_or_model):
         return schema_or_model  # a BaseModel subclass
-    # else: JSON schema path
-    schema = augment_schema_with_extra(schema_or_model, include_extra)
+
+    # else: JSON schema path - validate it first
+    validate_json_schema(schema_or_model)  # type: ignore[arg-type]
+
+    schema = augment_schema_with_extra(schema_or_model, include_extra)  # type: ignore[arg-type]
     # Inline local $ref references to avoid issues with Pydantic's schema generator
     schema_inlined = _inline_local_refs(schema)
     return StructuredDict(schema_inlined, name=schema_inlined.get("title", "Output"))

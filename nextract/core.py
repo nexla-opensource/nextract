@@ -4,11 +4,16 @@ import asyncio
 from typing import Any, Optional, Sequence, Union, Type
 
 from pydantic import BaseModel
+import structlog
 
 from .config import load_runtime_config, RuntimeConfig
 from .logging import setup_logging
 from .agent_runner import run_extraction_async, run_improvement_async
 from .schema import JsonSchema, is_pydantic_model, to_json_schema
+from .chunking import TokenEstimator, DocumentChunker, ChunkExtractor
+from .adaptive_extraction import extract_with_adaptive_retry
+
+log = structlog.get_logger(__name__)
 
 def extract(
     files: Sequence[str],
@@ -21,39 +26,280 @@ def extract(
     model: Optional[str] = None,
     config: Optional[RuntimeConfig] = None,
     setup_logs: bool = True,
+    enable_chunking: bool = True,
+    max_workers: Optional[int] = None,
+    enable_multipass: Optional[bool] = None,
+    num_passes: Optional[int] = None,
+    multipass_merge_strategy: Optional[str] = None,
+    enable_provenance: Optional[bool] = None,
+    enable_adaptive_extraction: bool = True,
 )-> dict[str, Any]:
-    """Synchronous convenience wrapper.
+    """
+    Extract structured data from documents using AI.
+
     Returns a dict with keys: data, report (model, files, usage, cost_estimate_usd, warnings).
 
-    - If a Pydantic model class is passed and return_pydantic=True, `data` will be that model instance;
-      otherwise `data` is a dict (Pydantic models are .model_dump()).
+    Args:
+        files: List of file paths to extract from
+        schema_or_model: JSON schema dict or Pydantic model class
+        user_prompt: Optional custom prompt
+        examples: Optional examples for few-shot learning
+        include_extra: Include extra fields not in schema
+        return_pydantic: Return Pydantic model instance (if schema_or_model is Pydantic)
+        model: Override model (e.g., "openai:gpt-4o")
+        config: Custom RuntimeConfig
+        setup_logs: Setup structured logging
+        enable_chunking: Automatically chunk large documents (default: True)
+        max_workers: Number of parallel workers for chunk processing (default: from config or 10)
+        enable_multipass: Run extraction multiple times and merge (default: from config or False)
+        num_passes: Number of extraction passes for multipass (default: from config or 3)
+        multipass_merge_strategy: Merge strategy for multipass ("union", "intersection", "majority", default: "union")
+        enable_provenance: Track where each field came from (default: from config or False)
+        enable_adaptive_extraction: Use intelligent two-pass extraction to improve field completeness (default: True)
+
+    Returns:
+        Dict with "data" (extracted data) and "report" (metadata, usage, cost, warnings)
+
+    Example:
+        from nextract import extract
+        from pydantic import BaseModel
+
+        class Invoice(BaseModel):
+            invoice_number: str
+            total_amount: float
+
+        result = extract(
+            files=["invoice.pdf"],
+            schema_or_model=Invoice,
+            max_workers=10,
+            enable_provenance=True
+        )
+
+        print(result["data"]["invoice_number"])
+        print(result["report"]["usage"]["field_provenance"])
     """
     if setup_logs:
         setup_logging()
 
     cfg = config or load_runtime_config()
-    # If a model is explicitly provided, it overrides env/config
-    if model is not None:
+
+    # Apply parameter overrides
+    if any([model, max_workers, enable_multipass, num_passes, multipass_merge_strategy, enable_provenance]):
         cfg = RuntimeConfig(
-            model=model,
+            model=model or cfg.model,
             max_concurrency=cfg.max_concurrency,
             max_run_retries=cfg.max_run_retries,
             per_call_timeout_secs=cfg.per_call_timeout_secs,
             pricing_json=cfg.pricing_json,
             max_validation_rounds=cfg.max_validation_rounds,
+            max_workers=max_workers if max_workers is not None else cfg.max_workers,
+            enable_multipass=enable_multipass if enable_multipass is not None else cfg.enable_multipass,
+            num_passes=num_passes if num_passes is not None else cfg.num_passes,
+            multipass_merge_strategy=multipass_merge_strategy or cfg.multipass_merge_strategy,
+            enable_provenance=enable_provenance if enable_provenance is not None else cfg.enable_provenance,
         )
 
-    data, report = asyncio.run(
-        run_extraction_async(
-            config=cfg,
+    # Convert to JSON schema for token estimation
+    schema = to_json_schema(schema_or_model)
+
+    # NEW: Estimate tokens and check if chunking needed
+    if enable_chunking:
+        estimator = TokenEstimator(cfg.model)
+        estimate = estimator.estimate_tokens(
             files=list(files),
-            schema_or_model=schema_or_model,
+            schema=schema,
             user_prompt=user_prompt,
-            examples=examples,
-            include_extra=include_extra,
-            return_pydantic=return_pydantic,
+            examples=list(examples) if examples else None
         )
-    )
+
+        log.info(
+            "token_estimation",
+            file_tokens=estimate.file_tokens,
+            schema_tokens=estimate.schema_tokens,
+            prompt_tokens=estimate.prompt_tokens,
+            total_tokens=estimate.total_tokens,
+            model_limit=estimate.model_limit,
+            utilization=f"{estimate.utilization:.1%}",
+            needs_chunking=estimate.needs_chunking,
+            recommended_chunks=estimate.recommended_chunks
+        )
+
+        # NEW: Check if field chunking is beneficial (before document chunking)
+        # Only use field chunking if adaptive extraction is NOT enabled
+        if not enable_adaptive_extraction:
+            from .field_chunking import should_chunk_fields, extract_with_field_chunking
+
+            # Calculate approximate document size
+            doc_size = sum(estimate.file_tokens for _ in files) * 4  # Rough char estimate
+
+            if should_chunk_fields(schema, doc_size) and not estimate.needs_chunking:
+                # Use field chunking instead of document chunking
+                log.info(
+                    "using_field_chunking",
+                    num_fields=len(schema.get("properties", {})),
+                    reason="large_schema_detected"
+                )
+
+                data, report_dict = asyncio.run(
+                    extract_with_field_chunking(
+                        files=list(files),
+                        schema=schema,
+                        config=cfg,
+                        user_prompt=user_prompt,
+                        examples=list(examples) if examples else None,
+                        include_extra=include_extra
+                    )
+                )
+
+                out: dict[str, Any] = {
+                    "data": data,
+                    "report": report_dict
+                }
+                return out
+
+        # If chunking needed, use chunk-based extraction
+        if estimate.needs_chunking:
+            log.warning(
+                "document_too_large_chunking_enabled",
+                total_tokens=estimate.total_tokens,
+                model_limit=estimate.model_limit,
+                effective_limit=int(estimate.model_limit * 0.7),
+                recommended_chunks=estimate.recommended_chunks,
+                message=f"Document exceeds context window ({estimate.total_tokens} tokens > {int(estimate.model_limit * 0.7)} limit). Automatically chunking into {estimate.recommended_chunks} pieces."
+            )
+
+            # Chunk documents
+            chunker = DocumentChunker()
+            chunks = chunker.chunk_documents(
+                file_paths=list(files),
+                num_chunks=estimate.recommended_chunks,
+                strategy="auto"
+            )
+
+            log.info(
+                "documents_chunked",
+                num_chunks=len(chunks),
+                chunk_types=[c.chunk_type for c in chunks]
+            )
+
+            # Extract from chunks with parallel processing and provenance
+            chunk_extractor = ChunkExtractor(
+                max_workers=cfg.max_workers,
+                enable_provenance=cfg.enable_provenance
+            )
+            data, report_dict = asyncio.run(
+                chunk_extractor.extract_from_chunks(
+                    chunks=chunks,
+                    schema=schema,
+                    config=cfg,
+                    user_prompt=user_prompt,
+                    examples=list(examples) if examples else None,
+                    include_extra=include_extra
+                )
+            )
+
+            # Return chunked extraction result
+            out: dict[str, Any] = {
+                "data": data,
+                "report": report_dict
+            }
+            return out
+
+    # Original extraction logic (no chunking needed)
+
+    # NEW: Check if adaptive extraction is enabled
+    if enable_adaptive_extraction and schema.get("type") == "object":
+        log.info(
+            "adaptive_extraction_enabled",
+            num_fields=len(schema.get("properties", {}))
+        )
+
+        data, report_dict = asyncio.run(
+            extract_with_adaptive_retry(
+                files=list(files),
+                schema=schema,
+                config=cfg,
+                user_prompt=user_prompt,
+                examples=list(examples) if examples else None,
+                include_extra=include_extra
+            )
+        )
+
+        out: dict[str, Any] = {
+            "data": data,
+            "report": report_dict
+        }
+        return out
+
+    # Check if multi-pass extraction is enabled
+    if cfg.enable_multipass:
+        from .multipass import MultiPassExtractor
+
+        log.info(
+            "multipass_extraction_enabled",
+            num_passes=cfg.num_passes,
+            merge_strategy=cfg.multipass_merge_strategy
+        )
+
+        # Create multi-pass extractor
+        multipass_extractor = MultiPassExtractor(
+            num_passes=cfg.num_passes,
+            fail_threshold=cfg.num_passes - 1  # At least 1 must succeed
+        )
+
+        # Define extraction function for multi-pass
+        async def extraction_fn(**kwargs):
+            result = await run_extraction_async(
+                config=cfg,
+                files=list(files),
+                schema_or_model=schema_or_model,
+                user_prompt=user_prompt,
+                examples=examples,
+                include_extra=include_extra,
+                return_pydantic=False,  # Always use dict for merging
+            )
+
+            # Convert to (data, report) tuple
+            return result[0], {
+                "usage": result[1].usage,
+                "cost_estimate_usd": result[1].cost_estimate_usd,
+                "warnings": []
+            }
+
+        # Run multi-pass extraction
+        multipass_result = asyncio.run(
+            multipass_extractor.extract_multipass(
+                extraction_fn=extraction_fn,
+                schema=schema,
+                merge_strategy=cfg.multipass_merge_strategy
+            )
+        )
+
+        # Extract data and create report
+        data = multipass_result.merged_data
+        report = type('Report', (), {
+            'model': cfg.model,
+            'files': list(files),
+            'usage': multipass_result.total_usage,
+            'cost_estimate_usd': multipass_result.total_cost,
+            'warnings': [
+                f"Multi-pass extraction: {multipass_result.successful_passes}/{multipass_result.total_passes} passes succeeded",
+                f"Merge strategy: {multipass_result.merge_strategy}"
+            ]
+        })()
+    else:
+        # Single-pass extraction
+        data, report = asyncio.run(
+            run_extraction_async(
+                config=cfg,
+                files=list(files),
+                schema_or_model=schema_or_model,
+                user_prompt=user_prompt,
+                examples=examples,
+                include_extra=include_extra,
+                return_pydantic=return_pydantic,
+            )
+        )
 
     # Ensure dict return by default
     if is_pydantic_model(schema_or_model) and not return_pydantic:
