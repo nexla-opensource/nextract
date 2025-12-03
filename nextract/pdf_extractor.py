@@ -15,7 +15,7 @@ from typing import Optional
 
 import structlog
 
-from .pdf_analyzer import PDFAnalyzer, PDFAnalysis, ExtractionMethod, PDFType
+from .pdf_analyzer import PDFAnalyzer, PDFAnalysis, ExtractionMethod
 
 log = structlog.get_logger(__name__)
 
@@ -140,7 +140,6 @@ class PDFTextExtractor:
     def _extract_with_tesseract(self, pdf_path: Path) -> str:
         """Extract text using Tesseract OCR (slow, for scanned PDFs)."""
         try:
-            import pytesseract
             from pdf2image import convert_from_path
         except ImportError:
             raise ImportError(
@@ -321,9 +320,7 @@ class PDFTextExtractor:
         """Check if Tesseract OCR is available."""
         try:
             import pytesseract
-            import pdf2image
-            from PIL import Image
-            
+
             # Try to get Tesseract version
             pytesseract.get_tesseract_version()
             return True

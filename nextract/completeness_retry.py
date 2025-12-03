@@ -7,14 +7,10 @@ context from the first attempt if needed.
 
 from __future__ import annotations
 
-import asyncio
-import time
 from typing import Any, Optional
 import structlog
 
-from .config import RuntimeConfig
 from .schema import JsonSchema
-from .chunking import DocumentChunk
 
 log = structlog.get_logger(__name__)
 

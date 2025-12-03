@@ -10,11 +10,9 @@ This module analyzes PDFs to determine the best extraction strategy:
 
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 import structlog
 

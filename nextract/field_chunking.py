@@ -15,7 +15,7 @@ field groups, extracting each group separately, then stitching results together.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 

@@ -17,8 +17,7 @@ Cost comparison (50-field schema):
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 

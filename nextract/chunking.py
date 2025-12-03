@@ -16,7 +16,7 @@ import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Optional, Sequence
+from typing import Any, Literal, Optional
 
 import structlog
 
@@ -24,7 +24,6 @@ from .config import RuntimeConfig
 from .mimetypes_map import is_pdf, is_textual, is_image
 from .schema import JsonSchema
 from .parallel import ParallelProcessor
-from .provenance import ProvenanceTracker
 
 log = structlog.get_logger(__name__)
 
@@ -863,7 +862,6 @@ class ChunkExtractor:
             - report_dict: extraction metadata and statistics
         """
 
-        from .agent_runner import run_extraction_async
         from .pricing import estimate_cost_usd, parse_pricing_json
         from jsonschema import Draft202012Validator, ValidationError
 
@@ -1258,7 +1256,7 @@ class ChunkExtractor:
                 "items": copy.deepcopy(schema)
             },
             "title": schema.get("title", "ChunkItems"),
-            "description": f"Chunk extraction wrapper for array schema. Extract all items found in this chunk."
+            "description": "Chunk extraction wrapper for array schema. Extract all items found in this chunk."
         }
 
         return wrapped
@@ -1329,7 +1327,7 @@ class ChunkExtractor:
             # Clean up on error
             try:
                 Path(temp_path).unlink(missing_ok=True)
-            except:
+            except Exception:
                 pass
             raise e
 

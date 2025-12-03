@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Optional
 import structlog
 
 log = structlog.get_logger(__name__)

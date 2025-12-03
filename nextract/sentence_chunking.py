@@ -136,7 +136,6 @@ class SentenceAwareChunker:
         Tracks newline boundaries for Rule A.
         """
         tokens = []
-        pos = 0
         prev_was_newline = True  # Start of document counts as after newline
         
         # Pattern: word | number | punctuation | whitespace
