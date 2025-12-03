@@ -805,22 +805,34 @@ class DocumentChunker:
 class ChunkExtractor:
     """Extract from chunks and merge results with optional parallel processing"""
 
-    def __init__(self, max_workers: int = 10, enable_provenance: bool = False):
+    def __init__(
+        self,
+        max_workers: int = 10,
+        enable_provenance: bool = False,
+        enable_completeness_retry: bool = False,
+        completeness_threshold: float = 0.7
+    ):
         """
         Initialize chunk extractor.
 
         Args:
             max_workers: Maximum number of parallel workers (default: 10)
             enable_provenance: Whether to track provenance (default: False)
+            enable_completeness_retry: Enable completeness-based retry for arrays (default: False)
+            completeness_threshold: Minimum completeness confidence to accept (default: 0.7)
         """
         self.max_workers = max_workers
         self.enable_provenance = enable_provenance
+        self.enable_completeness_retry = enable_completeness_retry
+        self.completeness_threshold = completeness_threshold
         self.processor = ParallelProcessor(max_workers=max_workers) if max_workers > 1 else None
 
         log.info(
             "chunk_extractor_initialized",
             max_workers=max_workers,
             enable_provenance=enable_provenance,
+            enable_completeness_retry=enable_completeness_retry,
+            completeness_threshold=completeness_threshold,
             parallel_enabled=self.processor is not None
         )
 
@@ -915,6 +927,14 @@ class ChunkExtractor:
 
         # 3. Merge results
         merge_start = time.time()
+
+        # Track productive chunks for retry logic (before merge)
+        productive_chunk_ids: list[int] = []
+        if is_array:
+            # Calculate which chunks contributed items
+            items_per_chunk = [len(self._unwrap_array_result(r)) for r in chunk_results]
+            productive_chunk_ids = [i for i, count in enumerate(items_per_chunk) if count > 0]
+
         merged_data, provenance = self._merge_chunk_results(chunk_results, schema)
 
         # Calculate merged_fields count (works for both arrays and objects)
@@ -935,6 +955,23 @@ class ChunkExtractor:
             result_type="array" if isinstance(merged_data, list) else "object",
             duration_ms=int(merge_duration * 1000)
         )
+
+        # 3.5. Completeness-based retry for array schemas (if enabled)
+        retry_metadata = {}
+        if self.enable_completeness_retry and is_array:
+            merged_data, retry_metadata = await self._retry_if_incomplete(
+                chunks=chunks,
+                schema=schema,
+                initial_data=merged_data,
+                config=config,
+                user_prompt=user_prompt,
+                examples=examples,
+                include_extra=include_extra,
+                productive_chunk_ids=productive_chunk_ids if is_array else None
+            )
+            # Update merged_fields_count after retry
+            if isinstance(merged_data, list):
+                merged_fields_count = len(merged_data)
 
         # 4. Validate against original schema
         validation_errors = []
@@ -1356,7 +1393,7 @@ IMPORTANT INSTRUCTIONS:
         Merge results from multiple chunks
 
         Strategy:
-        - For array schemas: Concatenate all items from all chunks
+        - For array schemas: Concatenate all items from all chunks, then deduplicate
         - For object schemas:
           - Simple fields: First non-empty value wins
           - Arrays: Concatenate and deduplicate
@@ -1387,14 +1424,31 @@ IMPORTANT INSTRUCTIONS:
                     for i in range(len(items)):
                         provenance[f"item_{start_idx + i}"] = f"chunk_{chunk_idx}"
 
+            # Track which chunks contributed items (for provenance-guided retry)
+            items_per_chunk = [len(self._unwrap_array_result(r)) for r in chunk_results]
+            productive_chunk_ids = [i for i, count in enumerate(items_per_chunk) if count > 0]
+
             log.info(
                 "array_chunks_merged",
                 total_chunks=len(chunk_results),
                 total_items=len(all_items),
-                items_per_chunk=[len(self._unwrap_array_result(r)) for r in chunk_results]
+                items_per_chunk=items_per_chunk,
+                productive_chunks=productive_chunk_ids
             )
 
-            return all_items, provenance
+            # Deduplicate items
+            deduplicated_items, dedup_stats = self._deduplicate_array_items(all_items, schema)
+
+            if dedup_stats['duplicates_removed'] > 0:
+                log.info(
+                    "array_items_deduplicated",
+                    original_count=dedup_stats['original_count'],
+                    unique_count=dedup_stats['unique_count'],
+                    duplicates_removed=dedup_stats['duplicates_removed'],
+                    dedup_method=dedup_stats['method']
+                )
+
+            return deduplicated_items, provenance
 
         # For object schemas, use the original merge logic
         merged: dict[str, Any] = {}
@@ -1428,6 +1482,116 @@ IMPORTANT INSTRUCTIONS:
 
         return merged, provenance
 
+    def _deduplicate_array_items(
+        self,
+        items: list[Any],
+        schema: JsonSchema
+    ) -> tuple[list[Any], dict[str, Any]]:
+        """
+        Deduplicate items in an array based on schema properties.
+
+        Strategy:
+        1. Identify unique key fields from schema (e.g., 'lender', 'name', 'id')
+        2. Use those fields to detect duplicates
+        3. Keep first occurrence of each unique item
+        4. Return deduplicated list and statistics
+
+        Args:
+            items: List of items to deduplicate
+            schema: Array schema with item definition
+
+        Returns:
+            (deduplicated_items, stats_dict)
+        """
+        if not items:
+            return items, {
+                'original_count': 0,
+                'unique_count': 0,
+                'duplicates_removed': 0,
+                'method': 'none'
+            }
+
+        original_count = len(items)
+
+        # Get item schema (what each array element looks like)
+        item_schema = schema.get('items', {})
+        properties = item_schema.get('properties', {})
+
+        # Identify potential unique key fields
+        # Common patterns: id, name, lender, account, entity, etc.
+        unique_key_candidates = [
+            'id', 'lender', 'name', 'legal_name', 'entity', 'account', 'account_number',
+            'borrower', 'party', 'counterparty', 'identifier', 'company', 'organization'
+        ]
+
+        # Find which key fields exist in the schema
+        unique_keys = [key for key in unique_key_candidates if key in properties]
+
+        if not unique_keys:
+            # No obvious unique key - try to use all string fields
+            unique_keys = [
+                key for key, prop in properties.items()
+                if prop.get('type') == 'string'
+            ]
+
+        if not unique_keys:
+            # Can't deduplicate without key fields - return as-is
+            log.debug(
+                "deduplication_skipped",
+                reason="no_unique_key_fields",
+                available_fields=list(properties.keys())
+            )
+            return items, {
+                'original_count': original_count,
+                'unique_count': original_count,
+                'duplicates_removed': 0,
+                'method': 'none'
+            }
+
+        # Deduplicate using the identified key fields
+        seen = set()
+        deduplicated = []
+        duplicates_found = []
+
+        for item in items:
+            if not isinstance(item, dict):
+                # Non-dict items - keep as-is
+                deduplicated.append(item)
+                continue
+
+            # Create a tuple of key field values for uniqueness check
+            key_values = tuple(
+                str(item.get(key, '')).strip().lower()
+                for key in unique_keys
+            )
+
+            if key_values in seen:
+                # Duplicate found
+                duplicates_found.append(item)
+                log.debug(
+                    "duplicate_item_found",
+                    key_fields=unique_keys,
+                    key_values=key_values,
+                    item=item
+                )
+            else:
+                # New unique item
+                seen.add(key_values)
+                deduplicated.append(item)
+
+        unique_count = len(deduplicated)
+        duplicates_removed = original_count - unique_count
+
+        stats = {
+            'original_count': original_count,
+            'unique_count': unique_count,
+            'duplicates_removed': duplicates_removed,
+            'method': f"key_fields_{','.join(unique_keys)}",
+            'unique_keys_used': unique_keys
+        }
+
+        return deduplicated, stats
+
     def _is_empty(self, value: Any) -> bool:
         """Check if a value is considered empty"""
         if value is None:
@@ -1437,6 +1601,481 @@ IMPORTANT INSTRUCTIONS:
         if isinstance(value, (list, dict)) and len(value) == 0:
             return True
         return False
+
+    async def _retry_if_incomplete(
+        self,
+        chunks: list[DocumentChunk],
+        schema: JsonSchema,
+        initial_data: list[Any],
+        config: RuntimeConfig,
+        user_prompt: str | None,
+        examples: list[Any] | None,
+        include_extra: bool,
+        productive_chunk_ids: list[int] | None = None
+    ) -> tuple[list[Any], dict[str, Any]]:
+        """
+        Retry extraction with provenance-guided page extraction.
+
+        Strategy:
+        1. Identify which chunks contain data (from initial extraction or productive_chunk_ids)
+        2. Extract page ranges from those chunks' metadata
+        3. Re-extract from ONLY those specific pages (focused extraction)
+        4. Assess completeness and retry if needed
+
+        Returns: (final_data, retry_metadata)
+        """
+        from .completeness_retry import (
+            create_completeness_schema,
+            extract_items_and_metadata,
+            should_retry,
+            create_retry_prompt
+        )
+        from .agent_runner import run_extraction_async
+        from .page_extraction import extract_pdf_pages
+        import tempfile
+        import os
+
+        log.info(
+            "provenance_guided_retry_started",
+            initial_items=len(initial_data),
+            threshold=self.completeness_threshold,
+            num_chunks=len(chunks)
+        )
+
+        # Step 1: Identify which chunks had data and extract page numbers
+        # HYBRID APPROACH: Combine multiple strategies
+        # 1. Track which chunks contributed items (from merge logs)
+        # 2. Parse page markers from productive chunks only
+        # 3. Parse user prompt for page hints
+
+        import re
+
+        # Strategy 1: Identify productive chunks
+        # We need to track which chunks had items during merge
+        # For now, we'll parse all chunks and use heuristics
+
+        chunk_page_map = {}  # chunk_id -> set of pages
+        source_file = None
+
+        for i, chunk in enumerate(chunks):
+            source_file = chunk.source_file
+            chunk_pages = set()
+
+            # Method 1: Check metadata for page_range (pdf_pages chunks)
+            if "page_range" in chunk.metadata:
+                start_page, end_page = chunk.metadata["page_range"]
+                for page in range(start_page, end_page + 1):
+                    chunk_pages.add(page)
+                log.info(
+                    "found_page_range_in_metadata",
+                    chunk_id=i,
+                    page_range=f"{start_page}-{end_page}"
+                )
+
+            # Method 2: Parse page markers from content (sentence-aware chunks)
+            elif isinstance(chunk.content, str):
+                # Look for "--- PAGE 123 ---" markers
+                page_markers = re.findall(r'---\s*PAGE\s+(\d+)\s*---', chunk.content)
+                if page_markers:
+                    for page_str in page_markers:
+                        chunk_pages.add(int(page_str))
+                    log.debug(
+                        "found_page_markers_in_content",
+                        chunk_id=i,
+                        num_pages=len(page_markers)
+                    )
+
+            if chunk_pages:
+                chunk_page_map[i] = chunk_pages
+
+        if not chunk_page_map or not source_file:
+            log.warning(
+                "no_page_info_found",
+                message="Could not determine page numbers from chunks"
+            )
+            return initial_data, {"retry_performed": False, "reason": "No page information found"}
+
+        # Strategy 2: Parse user prompt for page hints
+        user_hint_pages = set()
+        if user_prompt:
+            # Look for patterns like "page 166", "pages 165-167", "around page 166"
+            page_patterns = [
+                r'page\s+(\d+)',
+                r'pages\s+(\d+)\s*-\s*(\d+)',
+                r'around\s+page\s+(\d+)',
+                r'on\s+page\s+(\d+)'
+            ]
+
+            for pattern in page_patterns:
+                matches = re.findall(pattern, user_prompt, re.IGNORECASE)
+                if matches:
+                    for match in matches:
+                        if isinstance(match, tuple):
+                            # Range match
+                            for page_str in match:
+                                if page_str:
+                                    user_hint_pages.add(int(page_str))
+                        else:
+                            # Single page match
+                            user_hint_pages.add(int(match))
+
+            if user_hint_pages:
+                log.info(
+                    "parsed_page_hints_from_prompt",
+                    pages=sorted(user_hint_pages),
+                    prompt_snippet=user_prompt[:100]
+                )
+
+        # Step 3: Determine focused page range using HYBRID approach
+        # Priority:
+        # 1. User hint pages (if available)
+        # 2. Pages from chunk with most items (if we can infer)
+        # 3. Intersection of user hints and chunk pages
+        # 4. Fallback to heuristics
+
+        focused_start = None
+        focused_end = None
+        strategy_used = None
+
+        # Strategy A: User provided specific page hints
+        if user_hint_pages:
+            # Expand user hint by ±5 pages to ensure we capture the full table
+            sorted_hints = sorted(user_hint_pages)
+            hint_min = sorted_hints[0]
+            hint_max = sorted_hints[-1]
+
+            # Add buffer
+            buffer = 5
+            focused_start = max(1, hint_min - buffer)
+            focused_end = hint_max + buffer
+            strategy_used = "user_hint"
+
+            log.info(
+                "using_user_hint_pages",
+                user_hints=sorted_hints,
+                focused_range=f"{focused_start}-{focused_end}",
+                buffer=buffer
+            )
+
+        # Strategy B: Use productive chunks (chunks that contributed items)
+        # This is the most reliable indicator of where the data is
+        # IMPORTANT: Also include adjacent chunks to catch data split across boundaries
+        elif productive_chunk_ids and chunk_page_map:
+            # Include productive chunks AND their adjacent neighbors
+            # This helps catch tables/data that span chunk boundaries
+            expanded_chunk_ids = set(productive_chunk_ids)
+
+            for chunk_id in productive_chunk_ids:
+                # Add previous chunk (if exists)
+                if chunk_id > 0:
+                    expanded_chunk_ids.add(chunk_id - 1)
+                # Add next chunk (if exists)
+                if chunk_id < len(chunks) - 1:
+                    expanded_chunk_ids.add(chunk_id + 1)
+
+            log.info(
+                "expanding_productive_chunks",
+                original_chunks=productive_chunk_ids,
+                expanded_chunks=sorted(expanded_chunk_ids),
+                reason="Include adjacent chunks to catch data split across boundaries"
+            )
+
+            # Use all expanded chunks but check if the range is too broad
+            productive_pages = set()
+            for chunk_id in sorted(expanded_chunk_ids):
+                if chunk_id in chunk_page_map:
+                    productive_pages.update(chunk_page_map[chunk_id])
+
+            if productive_pages:
+                sorted_pages = sorted(productive_pages)
+                focused_start = sorted_pages[0]
+                focused_end = sorted_pages[-1]
+                page_range_size = focused_end - focused_start + 1
+
+                # Limit to max 150 pages to avoid context overflow
+                # If too broad, try using just the productive chunks without expansion
+                if page_range_size > 150:
+                    log.warning(
+                        "expanded_chunks_too_broad",
+                        original_range=f"{focused_start}-{focused_end}",
+                        num_pages=page_range_size,
+                        message="Expanded chunks span too many pages, using only productive chunks"
+                    )
+
+                    # Fall back to just productive chunks (no expansion)
+                    productive_pages = set()
+                    for chunk_id in productive_chunk_ids:
+                        if chunk_id in chunk_page_map:
+                            productive_pages.update(chunk_page_map[chunk_id])
+
+                    if productive_pages:
+                        sorted_pages = sorted(productive_pages)
+                        focused_start = sorted_pages[0]
+                        focused_end = sorted_pages[-1]
+                        page_range_size = focused_end - focused_start + 1
+
+                        # If still too broad, use largest chunk only
+                        if page_range_size > 100:
+                            log.warning(
+                                "productive_chunks_still_too_broad",
+                                original_range=f"{focused_start}-{focused_end}",
+                                num_pages=page_range_size,
+                                message="Using largest productive chunk only"
+                            )
+
+                            # Find the productive chunk with the most pages
+                            largest_chunk_id = None
+                            largest_chunk_size = 0
+                            for chunk_id in productive_chunk_ids:
+                                if chunk_id in chunk_page_map:
+                                    chunk_size = len(chunk_page_map[chunk_id])
+                                    if chunk_size > largest_chunk_size:
+                                        largest_chunk_size = chunk_size
+                                        largest_chunk_id = chunk_id
+
+                            if largest_chunk_id is not None:
+                                productive_pages = chunk_page_map[largest_chunk_id]
+                                sorted_pages = sorted(productive_pages)
+                                focused_start = sorted_pages[0]
+                                focused_end = sorted_pages[-1]
+                                strategy_used = f"largest_productive_chunk_{largest_chunk_id}"
+
+                                log.info(
+                                    "using_largest_productive_chunk",
+                                    chunk_id=largest_chunk_id,
+                                    num_pages=len(sorted_pages),
+                                    focused_range=f"{focused_start}-{focused_end}",
+                                    all_productive_chunks=productive_chunk_ids
+                                )
+                            else:
+                                strategy_used = None
+                        else:
+                            strategy_used = f"productive_chunks_{productive_chunk_ids}"
+                            log.info(
+                                "using_productive_chunk_pages",
+                                productive_chunk_ids=productive_chunk_ids,
+                                num_pages=len(sorted_pages),
+                                focused_range=f"{focused_start}-{focused_end}"
+                            )
+                    else:
+                        strategy_used = None
+                else:
+                    # Range is reasonable, use expanded chunks
+                    strategy_used = f"expanded_chunks_{sorted(expanded_chunk_ids)}"
+                    log.info(
+                        "using_expanded_chunk_pages",
+                        expanded_chunk_ids=sorted(expanded_chunk_ids),
+                        num_pages=len(sorted_pages),
+                        focused_range=f"{focused_start}-{focused_end}"
+                    )
+            else:
+                # Fallback to heuristic
+                strategy_used = None
+
+        # Strategy C: Find chunk with most pages (likely has the data)
+        # This is a proxy for "chunk with most items" when we don't have productive_chunk_ids
+        if strategy_used is None and chunk_page_map:
+            # Find the chunk with the smallest page range (most focused)
+            # OR the chunk in the middle (heuristic: data often in middle of doc)
+
+            # Try to find a focused chunk (small page range)
+            min_chunk_size = float('inf')
+            best_chunk_id = None
+
+            for chunk_id, pages in chunk_page_map.items():
+                chunk_size = len(pages)
+                # Look for chunks with 10-50 pages (likely a focused section)
+                if 10 <= chunk_size <= 50 and chunk_size < min_chunk_size:
+                    min_chunk_size = chunk_size
+                    best_chunk_id = chunk_id
+
+            if best_chunk_id is not None:
+                # Use this focused chunk's pages
+                chunk_pages = sorted(chunk_page_map[best_chunk_id])
+                focused_start = chunk_pages[0]
+                focused_end = chunk_pages[-1]
+                strategy_used = f"focused_chunk_{best_chunk_id}"
+
+                log.info(
+                    "using_focused_chunk_pages",
+                    chunk_id=best_chunk_id,
+                    num_pages=len(chunk_pages),
+                    focused_range=f"{focused_start}-{focused_end}"
+                )
+            else:
+                # Fallback: Use all pages from all chunks but narrow to middle
+                all_pages = set()
+                for pages in chunk_page_map.values():
+                    all_pages.update(pages)
+
+                sorted_pages = sorted(all_pages)
+
+                if len(sorted_pages) > 50:
+                    # Too many pages - focus on middle third
+                    third = len(sorted_pages) // 3
+                    focused_start = sorted_pages[third]
+                    focused_end = sorted_pages[2 * third]
+                    strategy_used = "middle_third"
+
+                    log.info(
+                        "using_middle_third_heuristic",
+                        total_pages=len(sorted_pages),
+                        focused_range=f"{focused_start}-{focused_end}"
+                    )
+                else:
+                    # Use all pages with buffer
+                    focused_start = max(1, sorted_pages[0] - 2)
+                    focused_end = sorted_pages[-1] + 2
+                    strategy_used = "all_pages_with_buffer"
+
+                    log.info(
+                        "using_all_pages",
+                        total_pages=len(sorted_pages),
+                        focused_range=f"{focused_start}-{focused_end}"
+                    )
+
+        if focused_start is None or focused_end is None:
+            log.warning("could_not_determine_page_range")
+            return initial_data, {"retry_performed": False, "reason": "Could not determine page range"}
+
+        log.info(
+            "focused_page_range_identified",
+            page_range=f"{focused_start}-{focused_end}",
+            num_pages=focused_end - focused_start + 1,
+            source_file=source_file,
+            strategy=strategy_used
+        )
+
+        # Step 4: Extract text from focused page range
+        temp_file = None
+        try:
+            focused_text = extract_pdf_pages(
+                pdf_path=source_file,
+                page_range=(focused_start, focused_end),
+                include_page_numbers=True
+            )
+
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(focused_text)
+                temp_file = f.name
+
+            # Step 5: Extract with completeness metadata
+            completeness_schema = create_completeness_schema(schema)
+
+            result = await run_extraction_async(
+                config=config,
+                files=[temp_file],
+                schema_or_model=completeness_schema,
+                user_prompt=user_prompt,
+                examples=examples,
+                include_extra=include_extra,
+                return_pydantic=False
+            )
+
+            items, metadata = extract_items_and_metadata(result[0])
+
+            log.info(
+                "focused_extraction_complete",
+                items_found=len(items),
+                extraction_complete=metadata.get("extraction_complete", True),
+                completeness_confidence=metadata.get("completeness_confidence", 1.0),
+                reason=metadata.get("reason", ""),
+                page_range=f"{focused_start}-{focused_end}"
+            )
+
+            # Step 6: Decide if retry is needed
+            if not should_retry(metadata, self.completeness_threshold):
+                log.info(
+                    "completeness_check_passed",
+                    items=len(items),
+                    confidence=metadata.get("completeness_confidence", 1.0)
+                )
+
+                # Deduplicate items before returning
+                deduplicated_items, dedup_stats = self._deduplicate_array_items(items, schema)
+
+                if dedup_stats['duplicates_removed'] > 0:
+                    log.info(
+                        "focused_extraction_deduplicated",
+                        original_count=dedup_stats['original_count'],
+                        unique_count=dedup_stats['unique_count'],
+                        duplicates_removed=dedup_stats['duplicates_removed'],
+                        dedup_method=dedup_stats['method']
+                    )
+
+                return deduplicated_items, {
+                    "retry_performed": False,
+                    "focused_extraction": True,
+                    "initial_items": len(initial_data),
+                    "final_items": len(deduplicated_items),
+                    "page_range": f"{focused_start}-{focused_end}",
+                    "metadata": metadata,
+                    "deduplication": dedup_stats
+                }
+
+            # Step 7: Retry with enhanced prompt on the focused pages
+            log.info(
+                "completeness_retry_triggered",
+                initial_items=len(items),
+                reason=metadata.get("reason", "Low confidence"),
+                confidence=metadata.get("completeness_confidence", 0.0),
+                page_range=f"{focused_start}-{focused_end}"
+            )
+
+            retry_prompt = create_retry_prompt(user_prompt, items, metadata)
+
+            retry_result = await run_extraction_async(
+                config=config,
+                files=[temp_file],  # Same focused page range
+                schema_or_model=completeness_schema,
+                user_prompt=retry_prompt,
+                examples=examples,
+                include_extra=include_extra,
+                return_pydantic=False
+            )
+
+            retry_items, retry_metadata = extract_items_and_metadata(retry_result[0])
+
+            log.info(
+                "completeness_retry_complete",
+                initial_items=len(items),
+                retry_items=len(retry_items),
+                improvement=len(retry_items) - len(items),
+                retry_confidence=retry_metadata.get("completeness_confidence", 0.0)
+            )
+
+            # Deduplicate retry items before returning
+            deduplicated_retry_items, dedup_stats = self._deduplicate_array_items(retry_items, schema)
+
+            if dedup_stats['duplicates_removed'] > 0:
+                log.info(
+                    "retry_extraction_deduplicated",
+                    original_count=dedup_stats['original_count'],
+                    unique_count=dedup_stats['unique_count'],
+                    duplicates_removed=dedup_stats['duplicates_removed'],
+                    dedup_method=dedup_stats['method']
+                )
+
+            return deduplicated_retry_items, {
+                "retry_performed": True,
+                "focused_extraction": True,
+                "page_range": f"{focused_start}-{focused_end}",
+                "initial_items": len(items),
+                "final_items": len(deduplicated_retry_items),
+                "initial_metadata": metadata,
+                "deduplication": dedup_stats,
+                "retry_metadata": retry_metadata,
+                "improvement": len(retry_items) - len(items)
+            }
+
+        finally:
+            # Clean up temp file
+            if temp_file:
+                try:
+                    os.unlink(temp_file)
+                except Exception as e:
+                    log.debug("temp_file_cleanup_failed", file=temp_file, error=str(e))
 
     def _aggregate_usage(self, all_usage: list[dict[str, Any]]) -> dict[str, Any]:
         """Aggregate usage statistics from multiple chunks"""

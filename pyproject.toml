@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nextract"
-version = "0.1.0"
+version = "0.2.0b4"
 description = "Structured extraction framework over Pydantic AI Agent with JSON Schema & Pydantic model outputs."
 readme = "README.md"
 authors = [
@@ -27,6 +27,11 @@ dependencies = [
     "typer>=0.12.0",
     "tenacity>=8.2.3",
     "rich>=13.7",
+    "PyMuPDF>=1.23.0",
+    "tiktoken>=0.5.0",
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.16.0",
+    "pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]

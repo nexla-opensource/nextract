@@ -11,7 +11,8 @@
 >   * PDFs and images are attached as **binary bytes**.
 >   * Office docs (`.doc/.docx/.ppt/.pptx`) are converted to **PDF** first when a converter is available.
 >   * Excel files: `.xlsx` is extracted to **TSV** (in-process); `.xls` attempts **CSV** via LibreOffice/unoconv.
-> * **No OCR**, no large-file chunking yet (TODO).
+> * **OCR support** for scanned PDFs using Tesseract (requires system installation of Tesseract binary).
+> * **Automatic chunking** for large documents with sentence-aware splitting and intelligent merging.
 > * Returns a **`dict`** by default, or a **Pydantic model instance** if you pass a model and request it.
 > * Tracing via **structlog**; usage & **cost estimation** from Agent usage + a simple model pricing table.
 
@@ -83,8 +84,6 @@
 **Not supported for now**
 
 * **Audio/Video** processing
-* **OCR** for scanned PDFs/images
-* **Large-file chunking & merging** (design is stubbed; not implemented)
 
 ---
 
@@ -101,6 +100,31 @@ pip install -e .[dev]
 ```
 
 > **Python**: 3.10+
+
+### System Dependencies
+
+**For OCR support (scanned PDFs)**, you need to install Tesseract OCR binary:
+
+- **macOS (Homebrew)**:
+  ```bash
+  brew install tesseract
+  ```
+
+- **Ubuntu/Debian**:
+  ```bash
+  sudo apt-get update && sudo apt-get install -y tesseract-ocr
+  ```
+
+- **Fedora/CentOS/RHEL**:
+  ```bash
+  sudo dnf install -y tesseract
+  ```
+
+- **Windows**:
+  - Download installer from [GitHub Tesseract releases](https://github.com/tesseract-ocr/tesseract)
+  - Add Tesseract to your system PATH
+
+> **Note**: The Python packages (`pytesseract`, `pdf2image`, `pillow`) are automatically installed with nextract. Only the Tesseract binary needs manual installation.
 
 ---
 
@@ -331,7 +355,7 @@ You can still construct and pass a `RuntimeConfig` if you need to tune concurren
   → Converted to **PDF** via LibreOffice/soffice or unoconv if available; on failure, attached as original binary.
 * **ZIP**: Extracted to `/tmp/nextract-zip-<name>`; each inner file is processed as above. No nested recursion.
 
-> **No OCR**: Scanned PDFs/images are **not** OCR’d. If the model can’t read them natively, fields may be missing.
+> **OCR Support**: Scanned PDFs are automatically detected and processed using Tesseract OCR. Requires Tesseract binary to be installed (see [Installation](#installation)).
 
 ---
 
@@ -451,7 +475,8 @@ Planned design (not implemented in this build):
 
 ## Limitations
 
-* No **OCR**, no **readability parsing** for HTML.
+* No **readability parsing** for HTML.
+* OCR requires Tesseract binary to be installed separately (Python packages are included).
 * Office conversions require `soffice` (LibreOffice) or `unoconv` installed; otherwise we fall back to attaching the original binary.
 * Office file understanding depends on the model/provider.
 * Very large inputs may exceed model or provider limits.

@@ -10,6 +10,9 @@ rich>=13.7
 # Document processing dependencies
 PyMuPDF>=1.23.0  # PDF processing and chunking
 tiktoken>=0.5.0  # Token counting for OpenAI models
+pytesseract>=0.3.10  # OCR text extraction from scanned PDFs
+pdf2image>=1.16.0  # Convert PDF pages to images for OCR
+pillow>=10.0.0  # Image processing for OCR
 
 # Development dependencies
 mypy>=1.7
