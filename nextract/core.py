@@ -10,7 +10,7 @@ from .config import load_runtime_config, RuntimeConfig
 from .logging import setup_logging
 from .agent_runner import run_extraction_async, run_improvement_async
 from .schema import JsonSchema, is_pydantic_model, to_json_schema
-from .chunking import TokenEstimator, DocumentChunker, ChunkExtractor
+from .chunking import TokenEstimator, TokenEstimate, DocumentChunker, ChunkExtractor
 from .adaptive_extraction import extract_with_adaptive_retry
 
 log = structlog.get_logger(__name__)
@@ -33,6 +33,8 @@ def extract(
     multipass_merge_strategy: Optional[str] = None,
     enable_provenance: Optional[bool] = None,
     enable_adaptive_extraction: bool = True,
+    enable_completeness_retry: bool = False,
+    completeness_threshold: float = 0.7,
 )-> dict[str, Any]:
     """
     Extract structured data from documents using AI.
@@ -56,6 +58,8 @@ def extract(
         multipass_merge_strategy: Merge strategy for multipass ("union", "intersection", "majority", default: "union")
         enable_provenance: Track where each field came from (default: from config or False)
         enable_adaptive_extraction: Use intelligent two-pass extraction to improve field completeness (default: True)
+        enable_completeness_retry: Enable completeness-based retry for array schemas (default: False)
+        completeness_threshold: Minimum completeness confidence to accept without retry (default: 0.7)
 
     Returns:
         Dict with "data" (extracted data) and "report" (metadata, usage, cost, warnings)
@@ -124,6 +128,25 @@ def extract(
             recommended_chunks=estimate.recommended_chunks
         )
 
+        # Force chunking for array schemas to avoid schema validation issues
+        # Array schemas need to be wrapped in objects, which only happens in chunked extraction
+        is_array_schema = schema.get("type") == "array"
+        if is_array_schema and not estimate.needs_chunking:
+            log.info(
+                "forcing_chunking_for_array_schema",
+                reason="Array schemas require chunking to wrap in object for extraction"
+            )
+            estimate = TokenEstimate(
+                file_tokens=estimate.file_tokens,
+                schema_tokens=estimate.schema_tokens,
+                prompt_tokens=estimate.prompt_tokens,
+                total_tokens=estimate.total_tokens,
+                model_limit=estimate.model_limit,
+                utilization=estimate.utilization,
+                needs_chunking=True,  # Force chunking
+                recommended_chunks=max(2, estimate.recommended_chunks)  # At least 2 chunks
+            )
+
         # NEW: Check if field chunking is beneficial (before document chunking)
         # Only use field chunking if adaptive extraction is NOT enabled
         if not enable_adaptive_extraction:
@@ -185,7 +208,9 @@ def extract(
             # Extract from chunks with parallel processing and provenance
             chunk_extractor = ChunkExtractor(
                 max_workers=cfg.max_workers,
-                enable_provenance=cfg.enable_provenance
+                enable_provenance=cfg.enable_provenance,
+                enable_completeness_retry=enable_completeness_retry,
+                completeness_threshold=completeness_threshold
             )
             data, report_dict = asyncio.run(
                 chunk_extractor.extract_from_chunks(

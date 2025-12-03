@@ -30,22 +30,25 @@ class PDFTextExtractor:
         analyzer: Optional[PDFAnalyzer] = None,
         enable_ocr: bool = True,
         ocr_dpi: int = 300,
-        include_page_numbers: bool = True
+        include_page_numbers: bool = True,
+        max_workers: int = 10
     ):
         """
         Initialize PDF text extractor.
-        
+
         Args:
             analyzer: PDF analyzer instance (creates default if None)
             enable_ocr: Enable Tesseract OCR for scanned pages
             ocr_dpi: DPI for OCR image conversion
             include_page_numbers: Include page markers in extracted text
+            max_workers: Maximum number of parallel workers for OCR (default: 10)
         """
         self.analyzer = analyzer or PDFAnalyzer()
         self.enable_ocr = enable_ocr
         self.ocr_dpi = ocr_dpi
         self.include_page_numbers = include_page_numbers
-        
+        self.max_workers = max_workers
+
         # Check OCR availability
         self.ocr_available = self._check_ocr_available()
     
@@ -144,25 +147,109 @@ class PDFTextExtractor:
                 "Tesseract OCR dependencies required. Install with: "
                 "pip install pytesseract pdf2image pillow"
             )
-        
+
         log.debug("extracting_with_tesseract", file=str(pdf_path), dpi=self.ocr_dpi)
-        
+
         # Convert PDF to images
         images = convert_from_path(pdf_path, dpi=self.ocr_dpi)
-        
+
+        log.info(
+            "ocr_conversion_complete",
+            file=str(pdf_path),
+            num_pages=len(images),
+            dpi=self.ocr_dpi
+        )
+
+        # Parallel OCR processing
+        if len(images) > 1:
+            text_parts = self._ocr_images_parallel(images)
+        else:
+            text_parts = self._ocr_images_sequential(images)
+
+        return "\n\n".join(text_parts)
+
+    def _ocr_images_sequential(self, images: list) -> list[str]:
+        """OCR images sequentially (for small documents)."""
+        import pytesseract
+
         text_parts = []
-        
         for page_num, image in enumerate(images, 1):
-            # OCR the image
             page_text = pytesseract.image_to_string(image)
-            
+
             if page_text.strip():
                 if self.include_page_numbers:
                     text_parts.append(f"--- PAGE {page_num} (OCR) ---\n{page_text}")
                 else:
                     text_parts.append(page_text)
-        
-        return "\n\n".join(text_parts)
+
+        return text_parts
+
+    def _ocr_images_parallel(self, images: list) -> list[str]:
+        """OCR images in parallel using ThreadPoolExecutor."""
+        import pytesseract
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        log.info(
+            "ocr_parallel_processing_started",
+            num_pages=len(images),
+            max_workers=self.max_workers
+        )
+
+        # Create a function to OCR a single page
+        def ocr_single_page(page_data: tuple) -> tuple[int, str]:
+            """OCR a single page and return (page_num, text)."""
+            page_num, image = page_data
+            try:
+                page_text = pytesseract.image_to_string(image)
+                return (page_num, page_text)
+            except Exception as e:
+                log.warning(
+                    "ocr_page_failed",
+                    page=page_num,
+                    error=str(e)
+                )
+                return (page_num, "")
+
+        # Process pages in parallel
+        results = {}
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all pages
+            future_to_page = {
+                executor.submit(ocr_single_page, (page_num, image)): page_num
+                for page_num, image in enumerate(images, 1)
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_page):
+                page_num, page_text = future.result()
+                results[page_num] = page_text
+
+                # Log progress every 10 pages
+                if len(results) % 10 == 0:
+                    log.info(
+                        "ocr_progress",
+                        completed=len(results),
+                        total=len(images),
+                        percentage=f"{len(results)/len(images)*100:.1f}%"
+                    )
+
+        log.info(
+            "ocr_parallel_processing_complete",
+            num_pages=len(images),
+            successful=len([t for t in results.values() if t.strip()])
+        )
+
+        # Reconstruct text parts in order
+        text_parts = []
+        for page_num in sorted(results.keys()):
+            page_text = results[page_num]
+            if page_text.strip():
+                if self.include_page_numbers:
+                    text_parts.append(f"--- PAGE {page_num} (OCR) ---\n{page_text}")
+                else:
+                    text_parts.append(page_text)
+
+        return text_parts
     
     def _extract_hybrid(self, pdf_path: Path) -> str:
         """
@@ -260,19 +347,21 @@ class PDFTextExtractor:
 def extract_pdf_text(
     pdf_path: str | Path,
     enable_ocr: bool = True,
-    include_page_numbers: bool = True
+    include_page_numbers: bool = True,
+    max_workers: int = 10
 ) -> tuple[str, PDFAnalysis]:
     """
     Convenience function to extract text from PDF.
-    
+
     Args:
         pdf_path: Path to PDF file
         enable_ocr: Enable OCR for scanned pages
         include_page_numbers: Include page markers in text
-        
+        max_workers: Maximum number of parallel workers for OCR (default: 10)
+
     Returns:
         (extracted_text, analysis)
-        
+
     Example:
         text, analysis = extract_pdf_text("document.pdf")
         print(f"PDF Type: {analysis.pdf_type.value}")
@@ -281,7 +370,8 @@ def extract_pdf_text(
     """
     extractor = PDFTextExtractor(
         enable_ocr=enable_ocr,
-        include_page_numbers=include_page_numbers
+        include_page_numbers=include_page_numbers,
+        max_workers=max_workers
     )
     return extractor.extract(pdf_path)
 
