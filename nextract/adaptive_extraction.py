@@ -1078,7 +1078,12 @@ async def extract_with_adaptive_retry(
     total_cost = (pass1_report.cost_estimate_usd or 0) + (pass2_report.cost_estimate_usd or 0)
 
     # Identify improvements (fields that were empty in Pass 1 but populated in merged result)
-    improvements = [f for f in missing_fields if merged_data.get(f) != pass1_data.get(f)]
+    improvements: list[str] = []
+    for field_path in missing_fields:
+        merged_value = get_nested_value(merged_data, field_path)
+        pass1_value = get_nested_value(pass1_data, field_path)
+        if merged_value != pass1_value:
+            improvements.append(field_path)
 
     # Create combined report
     report = {
@@ -1106,4 +1111,3 @@ async def extract_with_adaptive_retry(
     )
     
     return merged_data, report
-

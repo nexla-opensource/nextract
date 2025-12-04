@@ -9,7 +9,7 @@ import structlog
 from .config import load_runtime_config, RuntimeConfig
 from .logging import setup_logging
 from .agent_runner import run_extraction_async, run_improvement_async
-from .schema import JsonSchema, is_pydantic_model, to_json_schema
+from .schema import JsonSchema, cast_to_pydantic, is_pydantic_model, to_json_schema
 from .chunking import TokenEstimator, TokenEstimate, DocumentChunker, ChunkExtractor
 from .adaptive_extraction import extract_with_adaptive_retry
 
@@ -254,6 +254,9 @@ def extract(
             "data": data,
             "report": report_dict
         }
+        if return_pydantic and is_pydantic_model(schema_or_model):
+            data = cast_to_pydantic(schema_or_model, data)  # type: ignore[arg-type]
+            out["data"] = data
         return out
 
     # Check if multi-pass extraction is enabled

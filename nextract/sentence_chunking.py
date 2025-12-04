@@ -331,8 +331,9 @@ class SentenceAwareChunker:
         """Break long sentence at newline boundaries (Rule A)"""
         current_tokens = []
         current_length = 0
+        segment_start_idx = 0
         
-        for token in sentence.tokens:
+        for local_idx, token in enumerate(sentence.tokens):
             token_len = len(token.text)
             
             # If adding this token would exceed buffer and we have content
@@ -340,9 +341,10 @@ class SentenceAwareChunker:
                 # Check if we're at a newline boundary
                 if token.first_token_after_newline:
                     # Emit chunk at newline boundary
+                    start_idx = sentence.start_token_idx + segment_start_idx
                     sub_sentence = Sentence(
-                        start_token_idx=current_tokens[0].start_pos,
-                        end_token_idx=current_tokens[-1].end_pos,
+                        start_token_idx=start_idx,
+                        end_token_idx=start_idx + len(current_tokens),
                         tokens=current_tokens
                     )
                     yield self._create_chunk(
@@ -352,15 +354,17 @@ class SentenceAwareChunker:
                     )
                     current_tokens = []
                     current_length = 0
+                    segment_start_idx = local_idx
             
             current_tokens.append(token)
             current_length += token_len
         
         # Emit remaining tokens
         if current_tokens:
+            start_idx = sentence.start_token_idx + segment_start_idx
             sub_sentence = Sentence(
-                start_token_idx=current_tokens[0].start_pos,
-                end_token_idx=current_tokens[-1].end_pos,
+                start_token_idx=start_idx,
+                end_token_idx=start_idx + len(current_tokens),
                 tokens=current_tokens
             )
             yield self._create_chunk(
@@ -402,4 +406,3 @@ class SentenceAwareChunker:
             sentence_indices=sentence_indices,
             source_file=source_file
         )
-
