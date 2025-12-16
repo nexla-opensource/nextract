@@ -9,6 +9,17 @@ DEFAULT_MAX_RUN_RETRIES = int(os.getenv("NEXTRACT_MAX_RUN_RETRIES", "5"))
 DEFAULT_PER_CALL_TIMEOUT_SECS = float(os.getenv("NEXTRACT_PER_CALL_TIMEOUT_SECS", "120"))
 DEFAULT_MAX_VALIDATION_ROUNDS = int(os.getenv("NEXTRACT_MAX_VALIDATION_ROUNDS", "2"))
 
+# Parallel processing settings
+DEFAULT_MAX_WORKERS = int(os.getenv("NEXTRACT_MAX_WORKERS", "10"))
+
+# Multi-pass extraction settings
+DEFAULT_ENABLE_MULTIPASS = os.getenv("NEXTRACT_ENABLE_MULTIPASS", "false").lower() == "true"
+DEFAULT_NUM_PASSES = int(os.getenv("NEXTRACT_NUM_PASSES", "3"))
+DEFAULT_MULTIPASS_MERGE_STRATEGY = os.getenv("NEXTRACT_MULTIPASS_MERGE_STRATEGY", "union")
+
+# Provenance tracking settings
+DEFAULT_ENABLE_PROVENANCE = os.getenv("NEXTRACT_ENABLE_PROVENANCE", "false").lower() == "true"
+
 # JSON (string) mapping of model->pricing, e.g.
 # {"openai:gpt-4o": {"input_per_1k": 0.005, "output_per_1k": 0.015}}
 NEXTRACT_PRICING_JSON = os.getenv("NEXTRACT_PRICING", "")
@@ -21,6 +32,17 @@ class RuntimeConfig:
     per_call_timeout_secs: float = DEFAULT_PER_CALL_TIMEOUT_SECS
     pricing_json: str = NEXTRACT_PRICING_JSON
     max_validation_rounds: int = DEFAULT_MAX_VALIDATION_ROUNDS
+
+    # Parallel processing
+    max_workers: int = DEFAULT_MAX_WORKERS
+
+    # Multi-pass extraction
+    enable_multipass: bool = DEFAULT_ENABLE_MULTIPASS
+    num_passes: int = DEFAULT_NUM_PASSES
+    multipass_merge_strategy: str = DEFAULT_MULTIPASS_MERGE_STRATEGY
+
+    # Provenance tracking
+    enable_provenance: bool = DEFAULT_ENABLE_PROVENANCE
 
 def load_runtime_config() -> RuntimeConfig:
     return RuntimeConfig()

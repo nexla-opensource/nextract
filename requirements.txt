@@ -7,8 +7,16 @@ typer>=0.12.0
 tenacity>=8.2.3
 rich>=13.7
 
+# Document processing dependencies
+PyMuPDF>=1.23.0  # PDF processing and chunking
+tiktoken>=0.5.0  # Token counting for OpenAI models
+pytesseract>=0.3.10  # OCR text extraction from scanned PDFs
+pdf2image>=1.16.0  # Convert PDF pages to images for OCR
+pillow>=10.0.0  # Image processing for OCR
+
 # Development dependencies
 mypy>=1.7
 pytest>=7.0.0
 pytest-mock>=3.0.0
+pytest-asyncio>=0.21.0
 ruff>=0.1.0

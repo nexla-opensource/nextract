@@ -34,4 +34,4 @@ jobs:
       env:
         PYTHONWARNINGS: default
       run: |
-        pytest --maxfail=1 -q
+        pytest tests/ --maxfail=1 -q
