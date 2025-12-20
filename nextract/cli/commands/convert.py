@@ -16,6 +16,7 @@ app = typer.Typer(add_completion=False)
 def cli_convert(
     document: Path = typer.Argument(..., exists=True, readable=True),
     output_format: str = typer.Option("markdown", "--format", "-f"),
+    theme: str = typer.Option("system", "--theme", help="Theme for HTML output: light, dark, or system"),
     output: Optional[Path] = typer.Option(None, "--output", "-o"),
 ) -> None:
     artifacts = load_documents([document])
@@ -27,7 +28,7 @@ def cli_convert(
         text = ""
 
     formatter = _select_formatter(output_format)
-    result_payload = formatter.format(_build_result(text))
+    result_payload = formatter.format(_build_result(text), theme=theme)
 
     if output:
         output.write_text(result_payload)
