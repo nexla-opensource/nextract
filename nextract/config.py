@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from nextract.core.config import ChunkerConfig, ExtractionPlan, ExtractorConfig, ProviderConfig
+
 DEFAULT_MODEL = os.getenv("NEXTRACT_MODEL", "openai:gpt-4o")  # vision-capable by default
 DEFAULT_MAX_CONCURRENCY = int(os.getenv("NEXTRACT_MAX_CONCURRENCY", "4"))
 DEFAULT_MAX_RUN_RETRIES = int(os.getenv("NEXTRACT_MAX_RUN_RETRIES", "5"))
@@ -46,3 +48,13 @@ class RuntimeConfig:
 
 def load_runtime_config() -> RuntimeConfig:
     return RuntimeConfig()
+
+
+__all__ = [
+    "RuntimeConfig",
+    "load_runtime_config",
+    "ProviderConfig",
+    "ExtractorConfig",
+    "ChunkerConfig",
+    "ExtractionPlan",
+]

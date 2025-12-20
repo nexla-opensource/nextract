@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 from rich import print_json
 
-from .core import extract, batch_extract
+from .legacy_core import extract, batch_extract
 from .schema import is_pydantic_model
 
 app = typer.Typer(add_completion=False, help="nextract — structured extraction over Pydantic AI Agent")
