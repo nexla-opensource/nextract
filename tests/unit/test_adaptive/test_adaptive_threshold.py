@@ -7,7 +7,6 @@ Tests the new intelligent threshold system that adjusts based on:
 - Array extraction (number of instances)
 """
 
-import pytest
 from nextract.adaptive_extraction import (
     analyze_schema_complexity,
     analyze_document_complexity,

@@ -7,6 +7,7 @@ from typing import Optional
 import typer
 from rich import print_json
 
+from nextract.config import get_default_model_for_provider
 from nextract.core import ProviderConfig
 from nextract.schema import SchemaGenerator
 
@@ -22,7 +23,9 @@ def cli_suggest_schema(
     examples: Optional[Path] = typer.Option(None, "--examples"),
     output: Optional[Path] = typer.Option(None, "--output", "-o"),
 ) -> None:
-    provider_config = ProviderConfig(name=provider, model=model or "gpt-4o")
+    if model is None:
+        model = get_default_model_for_provider(provider)
+    provider_config = ProviderConfig(name=provider, model=model)
     generator = SchemaGenerator(provider=provider_config)
 
     examples_data = None

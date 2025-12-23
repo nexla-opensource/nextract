@@ -11,12 +11,10 @@ Tests cover:
 - Edge cases
 """
 
-import pytest
 from nextract.sentence_chunking import (
     SentenceAwareChunker,
     Token,
     Sentence,
-    TextChunk,
     CharInterval
 )
 

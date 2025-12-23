@@ -9,7 +9,6 @@ Tests:
 """
 
 import pytest
-from pathlib import Path
 from nextract.chunking import ChunkExtractor, DocumentChunk
 from nextract.multipass import MultiPassExtractor
 from nextract.provenance import ProvenanceTracker
@@ -55,7 +54,7 @@ class TestChunkExtractionIntegration:
         ]
         
         # Mock schema
-        schema = {
+        _ = {
             "type": "object",
             "properties": {
                 "test_field": {"type": "string"}

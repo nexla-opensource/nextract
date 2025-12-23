@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "title": "Contract",
+  "properties": {
+    "contract_id": {
+      "type": "string",
+      "description": "Contract identifier"
+    },
+    "effective_date": {
+      "type": "string",
+      "description": "Contract effective date"
+    },
+    "expiration_date": {
+      "type": "string",
+      "description": "Contract expiration date"
+    },
+    "parties": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "role": {"type": "string"},
+          "address": {"type": "string"}
+        },
+        "required": ["name"]
+      }
+    },
+    "terms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": {"type": "string"},
+          "content": {"type": "string"}
+        }
+      }
+    },
+    "total_value": {
+      "type": "number",
+      "description": "Total contract value"
+    }
+  },
+  "required": ["contract_id", "parties"]
+}

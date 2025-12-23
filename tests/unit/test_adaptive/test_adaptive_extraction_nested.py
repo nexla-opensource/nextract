@@ -9,7 +9,6 @@ Tests cover:
 - Focused prompt generation
 """
 
-import pytest
 from nextract.adaptive_extraction import (
     count_leaf_fields,
     get_nested_value,

@@ -9,8 +9,7 @@ Tests:
 """
 
 import pytest
-from nextract.multipass import MultiPassExtractor, MultiPassExtractionError, PassResult, MultiPassResult
-from nextract.schema import JsonSchema
+from nextract.multipass import MultiPassExtractor, MultiPassExtractionError, MultiPassResult
 
 
 class TestMultiPassExtractor:

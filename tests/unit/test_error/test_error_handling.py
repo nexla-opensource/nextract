@@ -9,7 +9,6 @@ Tests:
 """
 
 import pytest
-import traceback as tb
 from nextract.parallel import ParallelProcessor, ParallelProcessingError
 from nextract.multipass import MultiPassExtractor, MultiPassExtractionError
 

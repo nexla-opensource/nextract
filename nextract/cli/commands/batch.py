@@ -7,6 +7,7 @@ from typing import Optional
 import typer
 from rich import print_json
 
+from nextract.config import get_default_model_for_provider
 from nextract.core import ChunkerConfig, ExtractionPlan, ExtractorConfig, ProviderConfig
 from nextract.pipeline import BatchPipeline
 
@@ -33,7 +34,9 @@ def cli_batch(
 ) -> None:
     schema_obj = _load_schema(schema)
 
-    provider_config = ProviderConfig(name=provider, model=model or "gpt-4o")
+    if model is None:
+        model = get_default_model_for_provider(provider)
+    provider_config = ProviderConfig(name=provider, model=model)
     extractor_config = ExtractorConfig(name=extractor, provider=provider_config)
     chunker_config = ChunkerConfig(name=chunker)
 

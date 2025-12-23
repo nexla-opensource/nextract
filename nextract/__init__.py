@@ -13,6 +13,7 @@ try:
 except PackageNotFoundError:
     __version__ = "unknown"
 
+from nextract.config import get_default_model_for_provider  # noqa: E402
 from nextract.core import (  # noqa: E402
     ChunkerConfig,
     ExtractionPlan,
@@ -34,7 +35,9 @@ def extract_simple(
     prompt: str | None = None,
 ) -> Any:
     """Simplest extraction helper using a default text pipeline."""
-    provider_config = ProviderConfig(name=provider, model=model or "gpt-4o")
+    if model is None:
+        model = get_default_model_for_provider(provider)
+    provider_config = ProviderConfig(name=provider, model=model)
     extractor_config = ExtractorConfig(name="text", provider=provider_config)
     chunker_config = ChunkerConfig(name="semantic")
     plan = ExtractionPlan(extractor=extractor_config, chunker=chunker_config)

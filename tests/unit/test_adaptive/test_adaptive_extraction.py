@@ -10,7 +10,6 @@ Tests cover:
 - Edge cases
 """
 
-import pytest
 from nextract.adaptive_extraction import (
     identify_missing_fields,
     create_focused_schema,
