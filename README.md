@@ -81,9 +81,11 @@
 * **Accepted as binary, converted to PDF before uploading to LLMs**
 `.doc`, `.docx`, `.ppt`, `.pptx`
 
-**Not supported for now**
+* **Audio**: `.mp3`, `.wav`, `.m4a`, `.ogg`, `.flac`, `.aac`, `.wma`
+  → Attached as **binary bytes** with their native `audio/*` MIME type for models with audio input support.
 
-* **Audio/Video** processing
+* **Video**: `.mp4`, `.webm`, `.mov`, `.avi`, `.mkv`, `.wmv`
+  → Attached as **binary bytes** with their native `video/*` MIME type for models with video input support.
 
 ---
 
@@ -351,6 +353,10 @@ You can still construct and pass a `RuntimeConfig` if you need to tune concurren
   → Read as text and injected like other textual files. Best‑effort extraction (no styling/formatting).
 * **PDF / Images**: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp`, `.tiff`
   → Attached as **binary bytes** for the model (vision-capable models recommended).
+* **Audio**: `.mp3`, `.wav`, `.m4a`, `.ogg`, `.flac`, `.aac`, `.wma`
+  → Attached as **binary bytes** with native `audio/*` MIME type.
+* **Video**: `.mp4`, `.webm`, `.mov`, `.avi`, `.mkv`, `.wmv`
+  → Attached as **binary bytes** with native `video/*` MIME type.
 * **Office docs**: `.doc`, `.docx`, `.ppt`, `.pptx`
   → Converted to **PDF** via LibreOffice/soffice or unoconv if available; on failure, attached as original binary.
 * **ZIP**: Extracted to `/tmp/nextract-zip-<name>`; each inner file is processed as above. No nested recursion.

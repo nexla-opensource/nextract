@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from pydantic_ai import BinaryContent
-from .mimetypes_map import guess_mime, is_textual, is_pdf, is_image, is_zip, is_office_binary
+from .mimetypes_map import guess_mime, is_textual, is_pdf, is_image, is_zip, is_audio, is_video, is_office_binary
 
 import structlog
 
@@ -367,6 +367,16 @@ def _prepare_single_file(path: Path) -> list[PreparedPart]:
             bc = BinaryContent(data=path.read_bytes(), media_type=mime)
             parts.append(PreparedPart(binary=bc, source_path=path))
             return parts
+
+    if is_audio(path):
+        bc = BinaryContent(data=path.read_bytes(), media_type=mime)
+        parts.append(PreparedPart(binary=bc, source_path=path))
+        return parts
+
+    if is_video(path):
+        bc = BinaryContent(data=path.read_bytes(), media_type=mime)
+        parts.append(PreparedPart(binary=bc, source_path=path))
+        return parts
 
     if is_office_binary(path):
         # Convert Office docs to PDF, then attach PDF as binary for LLMs
