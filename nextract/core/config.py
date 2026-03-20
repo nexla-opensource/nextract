@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import Modality
 
@@ -12,13 +12,13 @@ class ProviderConfig:
 
     name: str
     model: str
-    api_key: Optional[str] = None
-    api_base: Optional[str] = None
+    api_key: str | None = None
+    api_base: str | None = None
     timeout: int = 60
     max_retries: int = 3
     temperature: float = 0.0
-    max_tokens: Optional[int] = None
-    extra_params: Dict[str, Any] = field(default_factory=dict)
+    max_tokens: int | None = None
+    extra_params: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> bool:
         if not self.name or not self.model:
@@ -34,11 +34,11 @@ class ExtractorConfig:
 
     name: str
     provider: ProviderConfig
-    fallback_provider: Optional[ProviderConfig] = None
+    fallback_provider: ProviderConfig | None = None
     enable_caching: bool = True
     batch_size: int = 1
-    modality: Optional[Modality] = None
-    extractor_params: Dict[str, Any] = field(default_factory=dict)
+    modality: Modality | None = None
+    extractor_params: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> bool:
         self.provider.validate()
@@ -51,13 +51,17 @@ class ExtractorConfig:
 
         extractor_registry = ExtractorRegistry.get_instance()
         extractor_class = extractor_registry.get(self.name)
-        if extractor_class:
-            supported_providers = extractor_class.get_supported_providers()
-            if self.provider.name not in supported_providers:
-                raise ValueError(
-                    f"Extractor '{self.name}' does not support "
-                    f"provider '{self.provider.name}'"
-                )
+        if extractor_class is None:
+            raise ValueError(
+                f"Unknown extractor: '{self.name}'. "
+                f"Available: {extractor_registry.list_extractors()}"
+            )
+        supported_providers = extractor_class.get_supported_providers()
+        if self.provider.name not in supported_providers:
+            raise ValueError(
+                f"Extractor '{self.name}' does not support "
+                f"provider '{self.provider.name}'"
+            )
         return True
 
 
@@ -86,14 +90,19 @@ class ChunkerConfig:
         chunker_registry = ChunkerRegistry.get_instance()
         chunker_class = chunker_registry.get(self.name)
 
-        if chunker_class:
-            applicable = chunker_class.get_applicable_modalities()
-            if modality not in applicable:
-                raise ValueError(
-                    f"Chunker '{self.name}' is not applicable "
-                    f"to modality '{modality.value}'. "
-                    f"Applicable modalities: {[m.value for m in applicable]}"
-                )
+        if chunker_class is None:
+            raise ValueError(
+                f"Unknown chunker: '{self.name}'. "
+                f"Available: {chunker_registry.get_chunkers_for_modality(modality)}"
+            )
+
+        applicable = chunker_class.get_applicable_modalities()
+        if modality not in applicable:
+            raise ValueError(
+                f"Chunker '{self.name}' is not applicable "
+                f"to modality '{modality.value}'. "
+                f"Applicable modalities: {[m.value for m in applicable]}"
+            )
 
         if modality == Modality.VISUAL:
             if self.pages_per_chunk < 1:
@@ -124,13 +133,14 @@ class ExtractionPlan:
     retry_on_failure: bool = True
     max_retries: int = 3
     backoff_factor: float = 2.0
-    validation_rules: List[str] = field(default_factory=list)
+    validation_rules: list[str] = field(default_factory=list)
     strict_validation: bool = False
 
     def validate(self) -> bool:
         self.extractor.validate()
 
         import nextract.extractors  # noqa: F401
+        import nextract.providers  # noqa: F401
 
         from nextract.registry.extractor_registry import ExtractorRegistry
 
@@ -142,6 +152,8 @@ class ExtractionPlan:
 
         if self.num_passes < 1:
             raise ValueError("num_passes must be >= 1")
+        if self.num_passes > 20:
+            raise ValueError(f"num_passes must be <= 20, got {self.num_passes}")
         if self.backoff_factor < 1:
             raise ValueError("backoff_factor must be >= 1")
 

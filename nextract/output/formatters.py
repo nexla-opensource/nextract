@@ -9,19 +9,30 @@ from typing import Any
 from nextract.core import BaseFormatter, ExtractionResult
 
 
+def _json_default(obj: Any) -> Any:
+    """Default JSON serializer for non-standard types."""
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "__float__"):
+        return float(obj)
+    return str(obj)
+
+
 class JsonFormatter(BaseFormatter):
     """Format extraction results as JSON."""
 
     def format(self, result: ExtractionResult, **kwargs: Any) -> str:
         indent = kwargs.get("indent", 2)
-        return json.dumps(result.data, ensure_ascii=False, indent=indent)
+        return json.dumps(result.data, ensure_ascii=False, indent=indent, default=_json_default)
 
 
 class MarkdownFormatter(BaseFormatter):
     """Format extraction results as Markdown."""
 
     def format(self, result: ExtractionResult, **kwargs: Any) -> str:
-        payload = json.dumps(result.data, ensure_ascii=False, indent=2)
+        payload = json.dumps(result.data, ensure_ascii=False, indent=2, default=_json_default)
         return "\n".join(
             [
                 "# Extraction Result",
@@ -41,9 +52,16 @@ class HtmlFormatter(BaseFormatter):
         if theme not in {"light", "dark", "system"}:
             theme = "system"
 
-        payload = json.dumps(result.data, ensure_ascii=False, indent=2)
+        payload = json.dumps(result.data, ensure_ascii=False, indent=2, default=_json_default)
         payload_html = html.escape(payload)
-        payload_script = payload.replace("</", "<\\/")
+        payload_script = (
+            json.dumps(result.data, ensure_ascii=False, indent=2, default=_json_default)
+            .replace("&", "\\u0026")
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
+        )
 
         template = """<!doctype html>
 <html lang="en" data-theme="__NEXTRACT_THEME__">
@@ -577,27 +595,40 @@ class HtmlFormatter(BaseFormatter):
 class CsvFormatter(BaseFormatter):
     """Format extraction results as CSV."""
 
+    @staticmethod
+    def _safe_csv_cell(value: object) -> object:
+        """Sanitize cell value to prevent CSV formula injection."""
+        s = str(value) if value is not None else ""
+        if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + s
+        return s
+
     def format(self, result: ExtractionResult, **kwargs: Any) -> str:
         data = result.data
         output = StringIO()
         writer = csv.writer(output)
 
         if isinstance(data, list):
-            rows = [row for row in data if isinstance(row, dict)]
+            rows = []
+            for row in data:
+                if isinstance(row, dict):
+                    rows.append(row)
+                else:
+                    rows.append({"value": row})
             if not rows:
                 return ""
             headers = sorted({key for row in rows for key in row.keys()})
-            writer.writerow(headers)
+            writer.writerow([self._safe_csv_cell(h) for h in headers])
             for row in rows:
-                writer.writerow([row.get(header, "") for header in headers])
+                writer.writerow([self._safe_csv_cell(row.get(header, "")) for header in headers])
             return output.getvalue()
 
         if isinstance(data, dict):
             writer.writerow(["field", "value"])
             for key, value in data.items():
-                writer.writerow([key, json.dumps(value, ensure_ascii=False)])
+                writer.writerow([self._safe_csv_cell(key), self._safe_csv_cell(json.dumps(value, ensure_ascii=False, default=_json_default))])
             return output.getvalue()
 
         writer.writerow(["value"])
-        writer.writerow([data])
+        writer.writerow([self._safe_csv_cell(data)])
         return output.getvalue()

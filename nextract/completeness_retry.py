@@ -7,7 +7,7 @@ context from the first attempt if needed.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 import structlog
 
 from .schema import JsonSchema
@@ -123,7 +123,7 @@ def should_retry(
 
 
 def create_retry_prompt(
-    original_prompt: Optional[str],
+    original_prompt: str | None,
     first_attempt_items: list[Any],
     metadata: dict[str, Any]
 ) -> str:

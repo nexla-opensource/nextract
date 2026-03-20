@@ -13,9 +13,11 @@ Key improvements over page-based chunking:
 - Flexible chunk sizes (not limited to page boundaries)
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from collections.abc import Iterator
 import structlog
 
 log = structlog.get_logger(__name__)
@@ -85,7 +87,7 @@ class TextChunk:
     text: str
     char_interval: CharInterval
     sentence_indices: tuple[int, int]  # (start_idx, end_idx) exclusive
-    source_file: Optional[str] = None
+    source_file: str | None = None
     
     def __len__(self) -> int:
         return len(self.text)
@@ -217,7 +219,7 @@ class SentenceAwareChunker:
     def chunk_text(
         self,
         text: str,
-        source_file: Optional[str] = None
+        source_file: str | None = None
     ) -> Iterator[TextChunk]:
         """
         Chunk text with sentence and newline awareness.
@@ -326,7 +328,7 @@ class SentenceAwareChunker:
         self,
         sentence: Sentence,
         chunk_id: int,
-        source_file: Optional[str]
+        source_file: str | None
     ) -> Iterator[TextChunk]:
         """Break long sentence at newline boundaries (Rule A)"""
         current_tokens = []
@@ -377,7 +379,7 @@ class SentenceAwareChunker:
         self,
         chunk_id: int,
         sentences: list[Sentence],
-        source_file: Optional[str]
+        source_file: str | None
     ) -> TextChunk:
         """Create a TextChunk from sentences"""
         if not sentences:

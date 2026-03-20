@@ -7,8 +7,8 @@ strategies to improve recall and handle variability in LLM outputs.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Callable
-from dataclasses import dataclass
+from typing import Any, Callable
+from dataclasses import dataclass, field
 import structlog
 
 from .schema import JsonSchema
@@ -20,23 +20,23 @@ log = structlog.get_logger(__name__)
 class PassResult:
     """Result from a single extraction pass"""
     pass_number: int
-    data: Dict[str, Any]
-    usage: Dict[str, Any]
-    cost: Optional[float] = None
-    errors: List[str] = None
+    data: dict[str, Any]
+    usage: dict[str, Any]
+    cost: float | None = None
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass
 class MultiPassResult:
     """Result from multi-pass extraction"""
-    merged_data: Dict[str, Any]
-    pass_results: List[PassResult]
+    merged_data: dict[str, Any]
+    pass_results: list[PassResult]
     total_passes: int
     successful_passes: int
     failed_passes: int
     merge_strategy: str
-    total_usage: Dict[str, Any]
-    total_cost: Optional[float] = None
+    total_usage: dict[str, Any]
+    total_cost: float | None = None
 
 
 class MultiPassExtractor:
@@ -72,7 +72,7 @@ class MultiPassExtractor:
     def __init__(
         self,
         num_passes: int = 3,
-        fail_threshold: Optional[int] = None
+        fail_threshold: int | None = None
     ):
         """
         Initialize multi-pass extractor.
@@ -237,10 +237,10 @@ class MultiPassExtractor:
     
     def _merge_results(
         self,
-        pass_results: List[Dict[str, Any]],
+        pass_results: list[dict[str, Any]],
         schema: JsonSchema,
         strategy: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Merge results from multiple passes.
         
@@ -278,8 +278,17 @@ class MultiPassExtractor:
                     values.append(value)
             
             # Apply merge strategy
-            if strategy == "union" or strategy == "first_non_empty":
-                # Take first non-empty value
+            if strategy == "union":
+                if values:
+                    # For list values, merge all lists
+                    merged_list = []
+                    for v in values:
+                        if isinstance(v, list):
+                            merged_list.extend(v)
+                        elif v:
+                            merged_list.append(v)
+                    merged[field_name] = merged_list if merged_list else values[0]
+            elif strategy == "first_non_empty":
                 if values:
                     merged[field_name] = values[0]
             
@@ -302,7 +311,7 @@ class MultiPassExtractor:
         
         return merged
     
-    def _most_common_value(self, values: List[Any]) -> Any:
+    def _most_common_value(self, values: list[Any]) -> Any:
         """Get most common value from list"""
         if not values:
             return None
@@ -324,7 +333,7 @@ class MultiPassExtractor:
         
         return values[0]
     
-    def _aggregate_usage(self, usage_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _aggregate_usage(self, usage_list: list[dict[str, Any]]) -> dict[str, Any]:
         """Aggregate usage from multiple passes"""
         total = {
             "requests": 0,
@@ -348,7 +357,7 @@ class MultiPassExtractionError(Exception):
     def __init__(
         self,
         message: str,
-        pass_results: List[PassResult],
+        pass_results: list[PassResult],
         failed_passes: int
     ):
         super().__init__(message)

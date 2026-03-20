@@ -119,7 +119,7 @@ nextract validate-config plan.json
 
 ## Configuration
 
-Provider and extractor settings are configured via `ProviderConfig`, `ExtractorConfig`, and `ChunkerConfig`. Environment variables can still be used for legacy runtime settings:
+Provider and extractor settings are configured via `ProviderConfig`, `ExtractorConfig`, and `ChunkerConfig`. Environment variables can also be used for runtime settings:
 
 - `NEXTRACT_MODEL`
 - `NEXTRACT_MAX_CONCURRENCY`

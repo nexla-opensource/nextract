@@ -36,8 +36,12 @@ class TestValidateJsonSchema:
     def test_non_object_type_raises(self):
         """Non-object type should raise."""
         schema = {"type": "string", "properties": {}}
-        with pytest.raises(ValueError, match="must have 'type': 'object'"):
+        with pytest.raises(ValueError, match="must have 'type': 'object' or 'array'"):
             validate_json_schema(schema)
+
+    def test_array_schema_is_valid(self, array_schema):
+        """Array-root schemas should be accepted."""
+        validate_json_schema(array_schema)
 
     def test_missing_type_warns(self, simple_schema):
         """Missing type should not raise but log warning."""
@@ -76,6 +80,11 @@ class TestAugmentSchemaWithExtra:
         result = augment_schema_with_extra(simple_schema, include_extra=True)
         assert result["required"] == simple_schema["required"]
 
+    def test_skips_augment_for_array_root(self, array_schema):
+        """Array-root schemas should not be rewritten for include_extra."""
+        result = augment_schema_with_extra(array_schema, include_extra=True)
+        assert result == array_schema
+
 
 class TestBuildOutputType:
     """Tests for build_output_type."""
@@ -94,6 +103,28 @@ class TestBuildOutputType:
         """JSON schema should return StructuredDict."""
         result = build_output_type(simple_schema, include_extra=False)
         assert result is not None
+
+    def test_returns_structured_output_for_array_schema(self, array_schema):
+        """Array schemas should keep structured output enabled."""
+        result = build_output_type(array_schema, include_extra=False)
+        assert result is not str
+
+    def test_returns_structured_output_for_top_level_ref(self):
+        """Top-level local refs should still produce structured output."""
+        schema = {
+            "$defs": {
+                "root": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                    },
+                }
+            },
+            "$ref": "#/$defs/root",
+        }
+
+        result = build_output_type(schema, include_extra=True)
+        assert result is not str
 
 
 class TestIsPydanticModel:

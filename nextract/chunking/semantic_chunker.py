@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List
-
 import structlog
 
 from nextract.core import BaseChunker, CharInterval, ChunkerConfig, DocumentArtifact, Modality, TextChunk
@@ -17,7 +15,7 @@ class SemanticChunker(BaseChunker):
     """Semantic chunker for text extractors."""
 
     @classmethod
-    def get_applicable_modalities(cls) -> List[Modality]:
+    def get_applicable_modalities(cls) -> list[Modality]:
         return [Modality.TEXT, Modality.HYBRID]
 
     def validate_config(self, config: ChunkerConfig) -> bool:
@@ -25,7 +23,7 @@ class SemanticChunker(BaseChunker):
             raise ValueError(f"chunk_size must be >= {config.min_chunk_size}")
         return True
 
-    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> List[TextChunk]:
+    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[TextChunk]:
         text = extract_text(document)
         if not text:
             log.warning("semantic_chunker_no_text", file=document.source_path)
@@ -34,7 +32,7 @@ class SemanticChunker(BaseChunker):
         max_chars = max(config.min_chunk_size, config.chunk_size)
         chunker = SentenceAwareChunker(max_char_buffer=max_chars)
 
-        chunks: List[TextChunk] = []
+        chunks: list[TextChunk] = []
         for chunk in chunker.chunk_text(text, source_file=document.source_path):
             chunks.append(
                 TextChunk(

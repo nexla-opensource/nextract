@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality
 from nextract.extractors.text_extractor import TextExtractor
@@ -15,7 +15,7 @@ class HybridExtractor(BaseExtractor):
     SUPPORTED_PROVIDERS = ["openai", "anthropic", "google", "azure", "local"]
 
     def __init__(self) -> None:
-        self.config: Optional[ExtractorConfig] = None
+        self.config: ExtractorConfig | None = None
         self._vlm = VLMExtractor()
         self._text = TextExtractor()
 
@@ -30,7 +30,7 @@ class HybridExtractor(BaseExtractor):
         return Modality.HYBRID
 
     @classmethod
-    def get_supported_providers(cls) -> List[str]:
+    def get_supported_providers(cls) -> list[str]:
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:
@@ -49,8 +49,8 @@ class HybridExtractor(BaseExtractor):
         input_data: Any,
         provider: Any,
         prompt: str,
-        schema: Optional[Dict[str, Any]] = None,
-        examples: Optional[List[Dict[str, Any]]] = None,
+        schema: dict[str, Any] | None = None,
+        examples: list[dict[str, Any]] | None = None,
         include_extra: bool = False,
         **kwargs: Any,
     ) -> ExtractorResult:
@@ -66,7 +66,7 @@ class HybridExtractor(BaseExtractor):
             else:
                 visual_chunks.append(chunk)
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         if visual_chunks:
             vlm_result = self._vlm.run(
@@ -92,6 +92,9 @@ class HybridExtractor(BaseExtractor):
             )
             results.extend(text_result.results)
 
+        # Preserve hybrid chunk ordering when both modalities are present.
+        results.sort(key=self._result_sort_key)
+
         provider_name = getattr(provider, "config", None)
         return ExtractorResult(
             name="hybrid",
@@ -104,3 +107,11 @@ class HybridExtractor(BaseExtractor):
                 "text_chunks": len(text_chunks),
             },
         )
+
+    @staticmethod
+    def _result_sort_key(result: dict[str, Any]) -> tuple[int, int, str]:
+        metadata = result.get("metadata") or {}
+        hybrid_order = metadata.get("hybrid_order")
+        if isinstance(hybrid_order, int):
+            return (0, hybrid_order, str(result.get("chunk_id", "")))
+        return (1, 0, str(result.get("chunk_id", "")))

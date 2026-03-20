@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
 from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality, ProviderRequest, TextChunk
+from nextract.extractors.fallback_mixin import FallbackMixin
 from nextract.prompts import build_examples_block, combine_system_prompt
-from nextract.registry import ProviderRegistry, register_extractor
+from nextract.registry import register_extractor
 
 log = structlog.get_logger(__name__)
 
 
 @register_extractor("text")
-class TextExtractor(BaseExtractor):
+class TextExtractor(FallbackMixin, BaseExtractor):
     """Extract from text-only inputs."""
 
     SUPPORTED_PROVIDERS = [
@@ -25,7 +26,7 @@ class TextExtractor(BaseExtractor):
     ]
 
     def __init__(self) -> None:
-        self.config: Optional[ExtractorConfig] = None
+        self.config: ExtractorConfig | None = None
 
     def initialize(self, config: ExtractorConfig) -> None:
         self.config = config
@@ -36,7 +37,7 @@ class TextExtractor(BaseExtractor):
         return Modality.TEXT
 
     @classmethod
-    def get_supported_providers(cls) -> List[str]:
+    def get_supported_providers(cls) -> list[str]:
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:
@@ -44,11 +45,11 @@ class TextExtractor(BaseExtractor):
 
     def run(
         self,
-        input_data: List[TextChunk],
+        input_data: list[TextChunk],
         provider: Any,
         prompt: str,
-        schema: Optional[Dict[str, Any]] = None,
-        examples: Optional[List[Dict[str, Any]]] = None,
+        schema: dict[str, Any] | None = None,
+        examples: list[dict[str, Any]] | None = None,
         include_extra: bool = False,
         **kwargs: Any,
     ) -> ExtractorResult:
@@ -57,7 +58,7 @@ class TextExtractor(BaseExtractor):
 
         examples_block = build_examples_block(examples)
         system_prompt = combine_system_prompt(prompt, include_extra, examples_block)
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         for idx, chunk in enumerate(input_data):
             messages = [
@@ -98,21 +99,3 @@ class TextExtractor(BaseExtractor):
             results=results,
             metadata={"modality": "text", "num_chunks": len(input_data)},
         )
-
-    def _safe_generate(self, provider: Any, request: ProviderRequest):
-        try:
-            return provider.generate(request)
-        except Exception as exc:  # noqa: BLE001
-            if self.config and self.config.fallback_provider:
-                fallback_class = ProviderRegistry.get_instance().get(
-                    self.config.fallback_provider.name
-                )
-                if not fallback_class:
-                    raise
-                fallback = fallback_class()
-                fallback.initialize(self.config.fallback_provider)
-                log.warning(
-                    "text_fallback_provider", error=str(exc), provider=self.config.fallback_provider.name
-                )
-                return fallback.generate(request)
-            raise

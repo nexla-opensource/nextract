@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 class NextractError(Exception):
     """Base exception for nextract errors."""
 

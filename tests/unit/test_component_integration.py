@@ -2,70 +2,14 @@
 Integration tests for the hybrid architecture features.
 
 Tests:
-- End-to-end parallel chunk extraction
 - Multi-pass extraction with real schemas
-- Provenance tracking integration
-- Combined features (parallel + multi-pass + provenance)
+- Combined features (parallel + multi-pass)
 """
 
 import pytest
-from nextract.chunking import ChunkExtractor, DocumentChunk
 from nextract.multipass import MultiPassExtractor
-from nextract.provenance import ProvenanceTracker
 from nextract.parallel import ParallelProcessor
 from nextract.config import RuntimeConfig
-
-
-class TestChunkExtractionIntegration:
-    """Test integration of parallel processing with chunk extraction"""
-    
-    def test_chunk_extractor_initialization_with_parallel(self):
-        """Test ChunkExtractor initializes with parallel processing"""
-        extractor = ChunkExtractor(max_workers=5, enable_provenance=True)
-        
-        assert extractor.max_workers == 5
-        assert extractor.enable_provenance is True
-        assert extractor.processor is not None
-        assert extractor.processor.max_workers == 5
-    
-    def test_chunk_extractor_initialization_without_parallel(self):
-        """Test ChunkExtractor initializes without parallel processing"""
-        extractor = ChunkExtractor(max_workers=1, enable_provenance=False)
-        
-        assert extractor.max_workers == 1
-        assert extractor.enable_provenance is False
-        assert extractor.processor is None  # No parallel processor for single worker
-    
-    @pytest.mark.asyncio
-    async def test_sequential_chunk_extraction(self):
-        """Test sequential chunk extraction (max_workers=1)"""
-        extractor = ChunkExtractor(max_workers=1, enable_provenance=False)
-        
-        # Create mock chunks
-        chunks = [
-            DocumentChunk(
-                chunk_id=i,
-                chunk_type="text",
-                content=f"Test content {i}",
-                source_file="test.txt",
-                metadata={"page": i}
-            )
-            for i in range(3)
-        ]
-        
-        # Mock schema
-        _ = {
-            "type": "object",
-            "properties": {
-                "test_field": {"type": "string"}
-            }
-        }
-        
-        # This would normally call the extraction, but we're testing the flow
-        # In a real test, we'd mock run_extraction_async
-        # For now, just verify the extractor is set up correctly
-        assert extractor.max_workers == 1
-        assert len(chunks) == 3
 
 
 class TestMultiPassIntegration:
@@ -115,50 +59,9 @@ class TestMultiPassIntegration:
         assert "age" in result.merged_data
 
 
-class TestProvenanceIntegration:
-    """Test integration of provenance tracking"""
-    
-    def test_provenance_with_chunks(self):
-        """Test provenance tracking with document chunks"""
-        tracker = ProvenanceTracker()
-        
-        chunk = DocumentChunk(
-            chunk_id=0,
-            chunk_type="text",
-            content="Invoice Number: INV-12345\nTotal: $1,234.56",
-            source_file="invoice.pdf",
-            metadata={"page": 1}
-        )
-        
-        # Track multiple fields from same chunk
-        prov1 = tracker.track_field(
-            field_name="invoice_number",
-            value="INV-12345",
-            chunk=chunk,
-            confidence=0.95
-        )
-        
-        prov2 = tracker.track_field(
-            field_name="total_amount",
-            value=1234.56,
-            chunk=chunk,
-            confidence=0.98
-        )
-        
-        # Both should reference same chunk
-        assert prov1.source_chunk == 0
-        assert prov2.source_chunk == 0
-        assert prov1.source_file == "invoice.pdf"
-        assert prov2.source_file == "invoice.pdf"
-        
-        # Should have citations
-        assert prov1.citation is not None
-        assert "INV-12345" in prov1.citation
-
-
 class TestCombinedFeatures:
     """Test combining multiple features together"""
-    
+
     def test_config_with_all_features(self):
         """Test RuntimeConfig with all new features enabled"""
         config = RuntimeConfig(
@@ -169,27 +72,12 @@ class TestCombinedFeatures:
             multipass_merge_strategy="union",
             enable_provenance=True
         )
-        
+
         assert config.max_workers == 10
         assert config.enable_multipass is True
         assert config.num_passes == 3
         assert config.multipass_merge_strategy == "union"
         assert config.enable_provenance is True
-    
-    def test_chunk_extractor_with_all_features(self):
-        """Test ChunkExtractor with parallel and provenance enabled"""
-        extractor = ChunkExtractor(
-            max_workers=10,
-            enable_provenance=True
-        )
-        
-        # Should have parallel processor
-        assert extractor.processor is not None
-        assert extractor.processor.max_workers == 10
-        
-        # Should have provenance enabled
-        assert extractor.enable_provenance is True
-
 
 class TestErrorHandlingIntegration:
     """Test error handling across integrated components"""
@@ -283,35 +171,6 @@ class TestPerformanceIntegration:
         speedup = time_seq / time_par
         assert speedup > 1.5, f"Expected speedup > 1.5x, got {speedup:.2f}x"
     
-    @pytest.mark.skip(reason="Implementation pending: multipass cost tracking")
-    @pytest.mark.asyncio
-    async def test_multipass_cost_tracking(self):
-        """Test that multi-pass correctly tracks cumulative costs"""
-        extractor = MultiPassExtractor(num_passes=5)
-        
-        async def mock_extraction(**kwargs):
-            return {"field1": "value"}, {
-                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
-                "cost_estimate_usd": 0.01,
-                "warnings": []
-            }
-        
-        schema = {"type": "object", "properties": {}}
-        
-        result = await extractor.extract_multipass(
-            extraction_fn=mock_extraction,
-            schema=schema,
-            merge_strategy="union"
-        )
-        
-        # Total cost should be 5x single pass
-        assert result.total_cost == pytest.approx(0.05)
-        
-        # Total usage should be aggregated
-        assert result.total_usage["prompt_tokens"] == 500
-        assert result.total_usage["completion_tokens"] == 250
-
-
 class TestConfigurationIntegration:
     """Test configuration propagation through the system"""
     

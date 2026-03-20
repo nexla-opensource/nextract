@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality
 
@@ -8,7 +8,7 @@ from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modal
 class CustomExtractorTemplate(BaseExtractor):
     """Template for custom extractor implementations."""
 
-    SUPPORTED_PROVIDERS: List[str] = []
+    SUPPORTED_PROVIDERS: list[str] = []
 
     def __init__(self) -> None:
         self.config: ExtractorConfig | None = None
@@ -21,7 +21,7 @@ class CustomExtractorTemplate(BaseExtractor):
         return Modality.TEXT
 
     @classmethod
-    def get_supported_providers(cls) -> List[str]:
+    def get_supported_providers(cls) -> list[str]:
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:

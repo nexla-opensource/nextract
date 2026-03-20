@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 import structlog
 
 from nextract.core import ExtractionPlan, ExtractionResult, ExtractorConfig, ProviderConfig
+from nextract.core.exceptions import PipelineError
 import nextract.chunking  # noqa: F401
 import nextract.extractors  # noqa: F401
 import nextract.providers  # noqa: F401
@@ -21,8 +24,8 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class BatchExtractionResult:
-    results: Dict[str, ExtractionResult]
-    suggestions: List[SchemaSuggestion] = field(default_factory=list)
+    results: dict[str, ExtractionResult]
+    suggestions: list[SchemaSuggestion] = field(default_factory=list)
 
 
 class ExtractionPipeline:
@@ -38,10 +41,10 @@ class ExtractionPipeline:
 
     def extract(
         self,
-        document: str | List[str],
-        schema: Dict[str, Any],
-        prompt: Optional[str] = None,
-        examples: Optional[List[Dict[str, Any]]] = None,
+        document: str | list[str],
+        schema: dict[str, Any],
+        prompt: str | None = None,
+        examples: list[dict[str, Any]] | None = None,
         include_extra: bool = False,
     ) -> ExtractionResult:
         documents = [document] if isinstance(document, str) else list(document)
@@ -49,13 +52,13 @@ class ExtractionPipeline:
 
         from nextract.ingest import DocumentValidator
 
-        validator = DocumentValidator()
+        doc_validator = DocumentValidator()
         for artifact in artifacts:
-            validation = validator.validate(artifact)
+            validation = doc_validator.validate(artifact)
             if not validation.valid:
-                raise ValueError("; ".join(validation.errors))
+                raise PipelineError("; ".join(validation.errors))
 
-        chunks: List[Any] = []
+        chunks: list[Any] = []
         for artifact in artifacts:
             chunks.extend(self.chunker.chunk(artifact, self.plan.chunker))
 
@@ -65,8 +68,8 @@ class ExtractionPipeline:
 
         prompt_text = prompt or "Extract the requested fields."
         if self.plan.num_passes > 1:
-            pass_outputs: List[Any] = []
-            pass_usage: List[Dict[str, Any]] = []
+            pass_outputs: list[Any] = []
+            pass_usage: list[dict[str, Any]] = []
 
             for pass_idx in range(1, self.plan.num_passes + 1):
                 merged_data, usage, extractor_name, provider_name = self._run_pass(
@@ -82,9 +85,14 @@ class ExtractionPipeline:
 
             if schema.get("type") == "array":
                 merged_data = []
+                seen = set()
                 for payload in pass_outputs:
                     if isinstance(payload, list):
-                        merged_data.extend(payload)
+                        for item in payload:
+                            item_key = json.dumps(item, sort_keys=True, default=str)
+                            if item_key not in seen:
+                                seen.add(item_key)
+                                merged_data.append(item)
             else:
                 merged_data = merge_partial_outputs([p for p in pass_outputs if isinstance(p, dict)])
             usage = self._aggregate_usage_from_passes(pass_usage)
@@ -101,8 +109,8 @@ class ExtractionPipeline:
             if self.plan.schema_validation and isinstance(schema, dict):
                 from nextract.validate import SchemaValidator
 
-                validator = SchemaValidator()
-                validation = validator.validate(merged_data, schema)
+                schema_validator = SchemaValidator()
+                validation = schema_validator.validate(merged_data, schema)
                 metadata["validation"] = validation
                 if self.plan.include_confidence:
                     metadata["confidence"] = validation.metadata.get("completeness")
@@ -132,8 +140,8 @@ class ExtractionPipeline:
         if self.plan.schema_validation and isinstance(schema, dict):
             from nextract.validate import SchemaValidator
 
-            validator = SchemaValidator()
-            validation = validator.validate(merged_data, schema)
+            schema_validator = SchemaValidator()
+            validation = schema_validator.validate(merged_data, schema)
             metadata["validation"] = validation
             if self.plan.include_confidence:
                 metadata["confidence"] = validation.metadata.get("completeness")
@@ -143,10 +151,10 @@ class ExtractionPipeline:
 
         return ExtractionResult(data=merged_data, metadata=metadata)
 
-    def _merge_chunk_results(self, results: List[Dict[str, Any]], schema: Dict[str, Any]) -> Any:
+    def _merge_chunk_results(self, results: list[dict[str, Any]], schema: dict[str, Any]) -> Any:
         payloads = [r.get("response") for r in results if isinstance(r.get("response"), (dict, list))]
         if schema.get("type") == "array":
-            merged: List[Any] = []
+            merged: list[Any] = []
             for payload in payloads:
                 if isinstance(payload, list):
                     merged.extend(payload)
@@ -159,12 +167,12 @@ class ExtractionPipeline:
 
     def _run_pass(
         self,
-        chunks: List[Any],
-        schema: Dict[str, Any],
+        chunks: list[Any],
+        schema: dict[str, Any],
         prompt: str,
-        examples: Optional[List[Dict[str, Any]]],
+        examples: list[dict[str, Any]] | None,
         include_extra: bool,
-    ) -> tuple[Any, Dict[str, Any], str, str]:
+    ) -> tuple[Any, dict[str, Any], str, str]:
         extractor_result = self.extractor.run(
             chunks,
             provider=self.provider,
@@ -178,7 +186,7 @@ class ExtractionPipeline:
         usage = self._aggregate_usage(extractor_result.results)
         return merged_data, usage, extractor_result.name, extractor_result.provider_name
 
-    def _aggregate_usage(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _aggregate_usage(self, results: list[dict[str, Any]]) -> dict[str, Any]:
         totals = {"requests": 0, "tool_calls": 0, "input_tokens": 0, "output_tokens": 0}
         for result in results:
             usage = result.get("usage") or {}
@@ -188,7 +196,7 @@ class ExtractionPipeline:
                     totals[key] += value
         return totals
 
-    def _aggregate_usage_from_passes(self, passes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _aggregate_usage_from_passes(self, passes: list[dict[str, Any]]) -> dict[str, Any]:
         totals = {"requests": 0, "tool_calls": 0, "input_tokens": 0, "output_tokens": 0}
         for usage in passes:
             for key in totals:
@@ -200,7 +208,7 @@ class ExtractionPipeline:
     def _build_extractor(self, config: ExtractorConfig):
         extractor_class = ExtractorRegistry.get_instance().get(config.name)
         if extractor_class is None:
-            raise ValueError(f"Unknown extractor: {config.name}")
+            raise PipelineError(f"Unknown extractor: {config.name}")
         extractor = extractor_class()
         extractor.initialize(config)
         return extractor
@@ -208,7 +216,7 @@ class ExtractionPipeline:
     def _build_provider(self, config: ProviderConfig):
         provider_class = ProviderRegistry.get_instance().get(config.name)
         if provider_class is None:
-            raise ValueError(f"Unknown provider: {config.name}")
+            raise PipelineError(f"Unknown provider: {config.name}")
         provider = provider_class()
         provider.initialize(config)
         return provider
@@ -216,7 +224,7 @@ class ExtractionPipeline:
     def _build_chunker(self, name: str):
         chunker_class = ChunkerRegistry.get_instance().get(name)
         if chunker_class is None:
-            raise ValueError(f"Unknown chunker: {name}")
+            raise PipelineError(f"Unknown chunker: {name}")
         return chunker_class()
 
 
@@ -228,7 +236,7 @@ class BatchPipeline:
         plan: ExtractionPlan,
         max_workers: int = 4,
         enable_suggestions: bool = False,
-        progress_callback: Optional[Any] = None,
+        progress_callback: Any | None = None,
     ) -> None:
         self.plan = plan
         self.max_workers = max_workers
@@ -238,13 +246,16 @@ class BatchPipeline:
     def extract_batch(
         self,
         documents: Iterable[str],
-        schema: Dict[str, Any],
-        prompt: Optional[str] = None,
-        examples: Optional[List[Dict[str, Any]]] = None,
+        schema: dict[str, Any],
+        prompt: str | None = None,
+        examples: list[dict[str, Any]] | None = None,
         include_extra: bool = False,
     ) -> BatchExtractionResult:
         docs_list = list(documents)
-        results: Dict[str, ExtractionResult] = {}
+        results: dict[str, ExtractionResult] = {}
+
+        # Validate plan once up front to fail fast before spawning workers
+        PlanValidator.raise_for_invalid(self.plan)
 
         def _run(doc: str) -> tuple[str, ExtractionResult]:
             pipeline = ExtractionPipeline(self.plan)
@@ -257,14 +268,26 @@ class BatchPipeline:
             )
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = [executor.submit(_run, doc) for doc in docs_list]
-            for idx, future in enumerate(concurrent.futures.as_completed(futures), start=1):
-                doc, result = future.result()
-                results[doc] = result
+            futures_to_docs: dict[concurrent.futures.Future, str] = {}
+            for doc in docs_list:
+                future = executor.submit(_run, doc)
+                futures_to_docs[future] = doc
+            for idx, future in enumerate(concurrent.futures.as_completed(futures_to_docs), start=1):
+                try:
+                    doc, result = future.result()
+                    results[doc] = result
+                except Exception as exc:
+                    log.error("batch_document_failed", error=str(exc))
+                    # Store error as a failed ExtractionResult
+                    doc_path = futures_to_docs.get(future, "unknown")
+                    results[doc_path] = ExtractionResult(
+                        data=None,
+                        metadata={"error": str(exc)},
+                    )
                 if self.progress_callback:
                     self.progress_callback(int((idx / len(docs_list)) * 100))
 
-        suggestions: List[SchemaSuggestion] = []
+        suggestions: list[SchemaSuggestion] = []
         if self.enable_suggestions:
             suggestions = self._suggest_schema_improvements(results, schema)
 
@@ -272,11 +295,11 @@ class BatchPipeline:
 
     def _suggest_schema_improvements(
         self,
-        results: Dict[str, ExtractionResult],
-        schema: Dict[str, Any],
-    ) -> List[SchemaSuggestion]:
+        results: dict[str, ExtractionResult],
+        schema: dict[str, Any],
+    ) -> list[SchemaSuggestion]:
         known_fields = set(schema.get("properties", {}).keys())
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
 
         for result in results.values():
             data = result.data
@@ -291,7 +314,7 @@ class BatchPipeline:
                     if key not in known_fields:
                         counts[key] = counts.get(key, 0) + 1
 
-        suggestions: List[SchemaSuggestion] = []
+        suggestions: list[SchemaSuggestion] = []
         total = max(len(results), 1)
         for key, count in sorted(counts.items(), key=lambda item: item[1], reverse=True):
             impact = round((count / total) * 100, 2)

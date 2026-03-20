@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 def default_system_prompt(include_extra: bool) -> str:
     extra_hint = (
@@ -16,7 +16,7 @@ def default_system_prompt(include_extra: bool) -> str:
         f"Return only the structured object—no prose, no explanations.{extra_hint}"
     )
 
-def build_examples_block(examples: Optional[Iterable[dict[str, Any] | tuple[Optional[str], dict[str, Any]]]]) -> str:
+def build_examples_block(examples: Iterable[dict[str, Any] | tuple[str | None, dict[str, Any]]] | None) -> str:
     """Examples can be either:
       - dicts (treated as output-only examples), or
       - tuples (input_excerpt, output_example_dict)
@@ -35,7 +35,7 @@ def build_examples_block(examples: Optional[Iterable[dict[str, Any] | tuple[Opti
             lines.append("    OUTPUT EXAMPLE:\n" + json.dumps(out, ensure_ascii=False))
     return "\n".join(lines)
 
-def combine_system_prompt(user_hint: Optional[str], include_extra: bool, examples_block: str) -> str:
+def combine_system_prompt(user_hint: str | None, include_extra: bool, examples_block: str) -> str:
     base = default_system_prompt(include_extra)
     if user_hint:
         base = base + f"\n\nUSER HINT:\n{user_hint.strip()}"
@@ -43,7 +43,7 @@ def combine_system_prompt(user_hint: Optional[str], include_extra: bool, example
         base = base + f"\n\n{examples_block}"
     return base
 
-def build_improvement_system_prompt(schema_json: dict[str, Any], user_hint: Optional[str]) -> str:
+def build_improvement_system_prompt(schema_json: dict[str, Any], user_hint: str | None) -> str:
     base = (
         "You are an assistant that improves a JSON Schema and user prompt for a data extraction task.\n"
         "Given the CURRENT SCHEMA and USER PROMPT and a set of extraction RESULTS, propose:\n"

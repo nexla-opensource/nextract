@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from nextract.core import BaseProvider, ProviderConfig, ProviderRequest, ProviderResponse
 
@@ -20,5 +20,5 @@ class CustomProviderTemplate(BaseProvider):
     def supports_structured_output(self) -> bool:
         return True
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         return {"vision": self.supports_vision(), "structured_output": True}

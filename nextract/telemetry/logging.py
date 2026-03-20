@@ -6,7 +6,8 @@ import structlog
 
 def setup_logging(level: int = logging.INFO) -> None:
     """Configure structlog for pretty console logs."""
-    logging.basicConfig(level=level, format="%(message)s")
+    # Note: Do not call logging.basicConfig() inside a library.
+    # Users should configure their own logging before calling setup_logging().
     structlog.configure(
         processors=[
             structlog.processors.TimeStamper(fmt="iso"),

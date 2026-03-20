@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import os
+from typing import Any
 
 from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality
 from nextract.registry import register_extractor
@@ -13,7 +14,7 @@ class TextractExtractor(BaseExtractor):
     SUPPORTED_PROVIDERS = ["aws"]
 
     def __init__(self) -> None:
-        self.config: Optional[ExtractorConfig] = None
+        self.config: ExtractorConfig | None = None
 
     def initialize(self, config: ExtractorConfig) -> None:
         self.config = config
@@ -24,14 +25,25 @@ class TextractExtractor(BaseExtractor):
         return Modality.VISUAL
 
     @classmethod
-    def get_supported_providers(cls) -> List[str]:
+    def get_supported_providers(cls) -> list[str]:
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:
-        required_params = ["aws_access_key", "aws_secret_key", "region"]
-        for param in required_params:
-            if param not in config.extractor_params:
-                raise ValueError(f"Textract requires '{param}' in extractor_params")
+        params = config.extractor_params
+        required = {
+            "aws_access_key": ("AWS_ACCESS_KEY_ID",),
+            "aws_secret_key": ("AWS_SECRET_ACCESS_KEY",),
+            "region": ("AWS_DEFAULT_REGION", "AWS_REGION"),
+        }
+        missing = []
+        for param_key, env_keys in required.items():
+            if param_key not in params and not any(os.environ.get(env_key) for env_key in env_keys):
+                missing.append(param_key)
+        if missing:
+            raise ValueError(
+                f"Textract requires: {', '.join(missing)} "
+                "(via extractor_params or environment variables)"
+            )
         return True
 
     def run(self, input_data: Any, provider: Any, **kwargs: Any) -> ExtractorResult:
@@ -43,15 +55,12 @@ class TextractExtractor(BaseExtractor):
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise ImportError("boto3 required for Textract. Install with: pip install boto3") from exc
 
-        params = self.config.extractor_params
         client = boto3.client(
             "textract",
-            aws_access_key_id=params["aws_access_key"],
-            aws_secret_access_key=params["aws_secret_key"],
-            region_name=params["region"],
+            **self._resolve_client_kwargs(),
         )
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         for idx, chunk in enumerate(input_data):
             document_bytes = self._get_chunk_bytes(chunk)
@@ -91,7 +100,33 @@ class TextractExtractor(BaseExtractor):
             metadata={"modality": "visual", "num_chunks": len(input_data)},
         )
 
-    def _get_chunk_bytes(self, chunk: Any) -> Optional[bytes]:
+    def _resolve_client_kwargs(self) -> dict[str, str]:
+        if not self.config:
+            raise ValueError("Extractor not initialized")
+
+        params = self.config.extractor_params
+        client_kwargs: dict[str, str] = {}
+        value_sources = {
+            "aws_access_key_id": (params.get("aws_access_key"), os.environ.get("AWS_ACCESS_KEY_ID")),
+            "aws_secret_access_key": (
+                params.get("aws_secret_key"),
+                os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            ),
+            "region_name": (
+                params.get("region"),
+                os.environ.get("AWS_DEFAULT_REGION"),
+                os.environ.get("AWS_REGION"),
+            ),
+        }
+
+        for client_key, candidates in value_sources.items():
+            value = next((candidate for candidate in candidates if candidate), None)
+            if value is not None:
+                client_kwargs[client_key] = value
+
+        return client_kwargs
+
+    def _get_chunk_bytes(self, chunk: Any) -> bytes | None:
         if hasattr(chunk, "content") and isinstance(chunk.content, (bytes, bytearray)):
             return bytes(chunk.content)
         if hasattr(chunk, "images") and getattr(chunk, "images", None):

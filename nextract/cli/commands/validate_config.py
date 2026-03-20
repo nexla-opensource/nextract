@@ -14,14 +14,26 @@ app = typer.Typer(add_completion=False)
 def _load_plan(path: Path) -> ExtractionPlan:
     data = json.loads(path.read_text())
 
-    provider_cfg = ProviderConfig(**data["extractor"]["provider"])
+    extractor_data = data.get("extractor")
+    if not extractor_data or not isinstance(extractor_data, dict):
+        raise KeyError("Missing or invalid 'extractor' section in plan configuration")
+
+    provider_data = extractor_data.get("provider")
+    if not provider_data or not isinstance(provider_data, dict):
+        raise KeyError("Missing or invalid 'provider' section in extractor configuration")
+
+    chunker_data = data.get("chunker")
+    if not chunker_data or not isinstance(chunker_data, dict):
+        raise KeyError("Missing or invalid 'chunker' section in plan configuration")
+
+    provider_cfg = ProviderConfig(**provider_data)
     extractor_cfg = ExtractorConfig(
-        name=data["extractor"]["name"],
+        name=extractor_data.get("name", "text"),
         provider=provider_cfg,
         fallback_provider=None,
-        extractor_params=data["extractor"].get("extractor_params", {}),
+        extractor_params=extractor_data.get("extractor_params", {}),
     )
-    chunker_cfg = ChunkerConfig(**data["chunker"])
+    chunker_cfg = ChunkerConfig(**chunker_data)
     plan_kwargs = {
         "num_passes": data.get("num_passes", 1),
         "include_confidence": data.get("include_confidence", True),
@@ -40,7 +52,18 @@ def _load_plan(path: Path) -> ExtractionPlan:
 
 @app.command("validate-config")
 def validate_config(plan_path: Path = typer.Argument(..., exists=True, readable=True)) -> None:
-    plan = _load_plan(plan_path)
+    try:
+        plan = _load_plan(plan_path)
+    except (KeyError, TypeError) as exc:
+        typer.echo(f"Invalid plan format: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except json.JSONDecodeError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.echo(f"Failed to load plan: {exc}", err=True)
+        raise typer.Exit(code=1)
+
     result = PlanValidator.validate_extraction_plan(plan)
     if result.valid:
         typer.echo("Plan is valid")

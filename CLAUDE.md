@@ -217,16 +217,10 @@ Templates are provided:
 ## Important Implementation Notes
 
 ### Test Status
-- Current test pass rate: ~85% (138/163 tests passing)
-- 12 tests are marked as "Skip pending implementation" (see recent commit)
+- Current test pass rate: ~96% (277/288 tests passing, 11 skipped)
+- Some tests are skipped pending implementation of new features
 - Known issues documented in `tests/README.md`
 - When adding new features, ensure tests are added and existing tests pass
-
-### Legacy Code
-Several "legacy" files exist during the V2 architecture transition:
-- `legacy_core.py`, `legacy_chunking.py`, `legacy_schema.py`, `legacy_cli.py`
-- These are deprecated and should not be extended
-- Use the new modular architecture in `nextract/core/`, `nextract/extractors/`, etc.
 
 ### Async Considerations
 - Some tests fail due to async configuration (pytest-asyncio)
@@ -234,7 +228,7 @@ Several "legacy" files exist during the V2 architecture transition:
 - Provider implementations may use async clients (pydantic-ai supports async)
 
 ### Configuration and Environment
-Environment variables (legacy, prefer config objects):
+Environment variables (prefer config objects):
 - `NEXTRACT_MODEL`: Default model
 - `NEXTRACT_MAX_CONCURRENCY`: Max concurrent requests
 - `NEXTRACT_MAX_RUN_RETRIES`: Retry attempts

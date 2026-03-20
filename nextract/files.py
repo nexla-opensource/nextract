@@ -18,7 +18,11 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
-TMP_ROOT = Path("/tmp")
+TMP_ROOT = Path(tempfile.gettempdir())
+
+_MAX_ZIP_MEMBERS = 500
+_MAX_ZIP_MEMBER_BYTES = 100 * 1024 * 1024  # 100 MB per member
+_MAX_ZIP_TOTAL_BYTES = 500 * 1024 * 1024   # 500 MB total
 
 @dataclass
 class PreparedPart:
@@ -55,8 +59,12 @@ def _which(*candidates: str) -> str | None:
 def _convert_office_to_pdf(path: Path) -> Path | None:
     """Convert .doc/.docx/.ppt/.pptx to PDF using available CLI tools.
 
-    Tries LibreOffice/soffice first, then unoconv. Writes output to a temp dir under /tmp.
+    Tries LibreOffice/soffice first, then unoconv. Writes output to a temp dir.
     Returns the PDF path on success, or None on failure.
+
+    NOTE: The returned path resides in a temp directory (its parent). Callers are
+    responsible for cleaning up via ``shutil.rmtree(pdf_path.parent)`` after consuming
+    the file.
     """
     # Prepare temp output directory per file
     out_dir = Path(tempfile.mkdtemp(prefix=f"nextract-officepdf-{path.stem}-", dir=str(TMP_ROOT)))
@@ -226,68 +234,72 @@ def _xlsx_to_text(path: Path) -> str:
 
 
 def _xls_to_text_via_cli(path: Path) -> str | None:
-    """Attempt to convert legacy .xls to CSV via CLI tools and return text.
+    """Attempt to convert .xls to CSV via CLI tools and return text.
 
     Prefers LibreOffice/soffice; falls back to unoconv. Returns CSV text for the first sheet.
     Returns None if conversion failed.
     """
     out_dir = Path(tempfile.mkdtemp(prefix=f"nextract-xls2csv-{path.stem}-", dir=str(TMP_ROOT)))
-    soffice = _which("soffice", "libreoffice")
-    if soffice:
-        try:
-            # Use CSV export filter; defaults to active sheet. We still accept it.
-            cmd = [
-                soffice,
-                "--headless",
-                "--convert-to",
-                "csv",
-                "--outdir",
-                str(out_dir),
-                str(path),
-            ]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-            # Find produced CSV (same stem or similar)
-            produced = list(out_dir.glob("*.csv"))
-            if produced:
-                try:
-                    return produced[0].read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    return produced[0].read_text(encoding="latin-1", errors="replace")
-            else:
-                log.debug(
-                    "xls_csv_no_output",
-                    tool="soffice",
-                    returncode=res.returncode,
-                    stdout=res.stdout.decode(errors="ignore"),
-                    stderr=res.stderr.decode(errors="ignore"),
-                    file=str(path),
-                )
-        except Exception as e:  # noqa: BLE001
-            log.debug("xls_csv_exception", tool="soffice", error=str(e), file=str(path))
+    try:
+        soffice = _which("soffice", "libreoffice")
+        if soffice:
+            try:
+                # Use CSV export filter; defaults to active sheet. We still accept it.
+                cmd = [
+                    soffice,
+                    "--headless",
+                    "--convert-to",
+                    "csv",
+                    "--outdir",
+                    str(out_dir),
+                    str(path),
+                ]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                # Find produced CSV (same stem or similar)
+                produced = list(out_dir.glob("*.csv"))
+                if produced:
+                    try:
+                        return produced[0].read_text(encoding="utf-8")
+                    except UnicodeDecodeError:
+                        return produced[0].read_text(encoding="latin-1", errors="replace")
+                else:
+                    log.debug(
+                        "xls_csv_no_output",
+                        tool="soffice",
+                        returncode=res.returncode,
+                        stdout=res.stdout.decode(errors="ignore"),
+                        stderr=res.stderr.decode(errors="ignore"),
+                        file=str(path),
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.debug("xls_csv_exception", tool="soffice", error=str(e), file=str(path))
 
-    unoconv = _which("unoconv")
-    if unoconv:
-        try:
-            cmd = [unoconv, "-f", "csv", "-o", str(out_dir), str(path)]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-            produced = list(out_dir.glob("*.csv"))
-            if produced:
-                try:
-                    return produced[0].read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    return produced[0].read_text(encoding="latin-1", errors="replace")
-            else:
-                log.debug(
-                    "xls_csv_no_output",
-                    tool="unoconv",
-                    returncode=res.returncode,
-                    stdout=res.stdout.decode(errors="ignore"),
-                    stderr=res.stderr.decode(errors="ignore"),
-                    file=str(path),
-                )
-        except Exception as e:  # noqa: BLE001
-            log.debug("xls_csv_exception", tool="unoconv", error=str(e), file=str(path))
-    return None
+        unoconv = _which("unoconv")
+        if unoconv:
+            try:
+                cmd = [unoconv, "-f", "csv", "-o", str(out_dir), str(path)]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                produced = list(out_dir.glob("*.csv"))
+                if produced:
+                    try:
+                        return produced[0].read_text(encoding="utf-8")
+                    except UnicodeDecodeError:
+                        return produced[0].read_text(encoding="latin-1", errors="replace")
+                else:
+                    log.debug(
+                        "xls_csv_no_output",
+                        tool="unoconv",
+                        returncode=res.returncode,
+                        stdout=res.stdout.decode(errors="ignore"),
+                        stderr=res.stderr.decode(errors="ignore"),
+                        file=str(path),
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.debug("xls_csv_exception", tool="unoconv", error=str(e), file=str(path))
+        return None
+    finally:
+        # Clean up temp directory after reading CSV content into memory
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 def _prepare_single_file(path: Path) -> list[PreparedPart]:
     parts: list[PreparedPart] = []
@@ -371,19 +383,25 @@ def _prepare_single_file(path: Path) -> list[PreparedPart]:
     if is_office_binary(path):
         # Convert Office docs to PDF, then attach PDF as binary for LLMs
         pdf_path = _convert_office_to_pdf(path)
-        if pdf_path and pdf_path.exists():
-            try:
-                pdf_bytes = pdf_path.read_bytes()
-                bc = BinaryContent(data=pdf_bytes, media_type="application/pdf")
-                parts.append(PreparedPart(binary=bc, source_path=path))
-                return parts
-            except Exception as e:  # noqa: BLE001
-                log.debug("office_pdf_read_failed", file=str(pdf_path), error=str(e))
-        # Fallback: attach original binary if conversion failed
-        log.warning("office_pdf_conversion_failed_fallback_binary", file=str(path))
-        bc = BinaryContent(data=path.read_bytes(), media_type=mime)
-        parts.append(PreparedPart(binary=bc, source_path=path))
-        return parts
+        tmp_dir = pdf_path.parent if pdf_path else None
+        try:
+            if pdf_path and pdf_path.exists():
+                try:
+                    pdf_bytes = pdf_path.read_bytes()
+                    bc = BinaryContent(data=pdf_bytes, media_type="application/pdf")
+                    parts.append(PreparedPart(binary=bc, source_path=path))
+                    return parts
+                except Exception as e:  # noqa: BLE001
+                    log.debug("office_pdf_read_failed", file=str(pdf_path), error=str(e))
+            # Fallback: attach original binary if conversion failed
+            log.warning("office_pdf_conversion_failed_fallback_binary", file=str(path))
+            bc = BinaryContent(data=path.read_bytes(), media_type=mime)
+            parts.append(PreparedPart(binary=bc, source_path=path))
+            return parts
+        finally:
+            # Clean up the temp directory created by _convert_office_to_pdf
+            if tmp_dir and tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # Default: attach as binary blob
     bc = BinaryContent(data=path.read_bytes(), media_type=mime)
@@ -391,17 +409,31 @@ def _prepare_single_file(path: Path) -> list[PreparedPart]:
     return parts
 
 def _safe_extract_zip(zip_path: Path, dest_dir: Path) -> list[Path]:
-    """Extract a zip to dest_dir, avoiding traversal. Returns extracted file paths."""
+    """Extract a zip to dest_dir, avoiding traversal and zip bombs. Returns extracted file paths."""
     extracted: list[Path] = []
     with zipfile.ZipFile(zip_path, "r") as zf:
-        for member in zf.infolist():
+        members = [m for m in zf.infolist() if not m.is_dir()]
+        if len(members) > _MAX_ZIP_MEMBERS:
+            raise ValueError(
+                f"ZIP contains {len(members)} members, exceeding limit of {_MAX_ZIP_MEMBERS}"
+            )
+        total_bytes = 0
+        for member in members:
             # prevent directory traversal
             member_path = Path(member.filename)
-            if member.is_dir():
-                continue
+            if member.file_size > _MAX_ZIP_MEMBER_BYTES:
+                raise ValueError(
+                    f"ZIP member {member.filename!r} is {member.file_size} bytes, "
+                    f"exceeding per-member limit of {_MAX_ZIP_MEMBER_BYTES}"
+                )
+            total_bytes += member.file_size
+            if total_bytes > _MAX_ZIP_TOTAL_BYTES:
+                raise ValueError(
+                    f"ZIP total uncompressed size exceeds limit of {_MAX_ZIP_TOTAL_BYTES}"
+                )
             target = dest_dir / member_path.name
             with zf.open(member, "r") as src, open(target, "wb") as dst:
-                dst.write(src.read())
+                shutil.copyfileobj(src, dst, length=65536)
             extracted.append(target)
     return extracted
 
@@ -415,10 +447,13 @@ def prepare_parts(file_paths: Sequence[str | os.PathLike[str] | Path]) -> list[P
 
         if is_zip(path):
             # Extract and treat each contained file individually.
-            out_dir = TMP_ROOT / f"nextract-zip-{path.stem}"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            for fp in _safe_extract_zip(path, out_dir):
-                parts.extend(_prepare_single_file(fp))
+            out_dir = Path(tempfile.mkdtemp(prefix=f"nextract-zip-{path.stem}-", dir=str(TMP_ROOT)))
+            try:
+                for fp in _safe_extract_zip(path, out_dir):
+                    parts.extend(_prepare_single_file(fp))
+            finally:
+                # Clean up extracted zip contents after preparing parts
+                shutil.rmtree(out_dir, ignore_errors=True)
         else:
             parts.extend(_prepare_single_file(path))
 

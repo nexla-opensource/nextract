@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from nextract.core import ExtractionPlan, Modality, ValidationResult
 from nextract.core.exceptions import PlanError
@@ -33,18 +33,23 @@ class PlanValidator:
         chunker_registry = ChunkerRegistry.get_instance()
         chunker_class = chunker_registry.get(plan.chunker.name)
 
-        if chunker_class:
-            applicable = chunker_class.get_applicable_modalities()
-            if modality not in applicable:
-                return ValidationResult(
-                    valid=False,
-                    errors=[
-                        f"Chunker '{plan.chunker.name}' is not "
-                        f"applicable to modality '{modality.value}'. "
-                        f"Available chunkers: "
-                        f"{chunker_registry.get_chunkers_for_modality(modality)}"
-                    ],
-                )
+        if chunker_class is None:
+            return ValidationResult(
+                valid=False,
+                errors=[f"Unknown chunker: '{plan.chunker.name}'."],
+            )
+
+        applicable = chunker_class.get_applicable_modalities()
+        if modality not in applicable:
+            return ValidationResult(
+                valid=False,
+                errors=[
+                    f"Chunker '{plan.chunker.name}' is not "
+                    f"applicable to modality '{modality.value}'. "
+                    f"Available chunkers: "
+                    f"{chunker_registry.get_chunkers_for_modality(modality)}"
+                ],
+            )
 
         supported_providers = extractor_class.get_supported_providers()
         if plan.extractor.provider.name not in supported_providers:
@@ -60,7 +65,7 @@ class PlanValidator:
         provider_registry = ProviderRegistry.get_instance()
         provider_class = provider_registry.get(plan.extractor.provider.name)
 
-        if provider_class and modality == Modality.VISUAL:
+        if provider_class and modality in {Modality.VISUAL, Modality.HYBRID}:
             provider = provider_class()
             provider.initialize(plan.extractor.provider)
             if not provider.supports_vision():
@@ -68,7 +73,7 @@ class PlanValidator:
                     valid=False,
                     errors=[
                         f"Provider '{plan.extractor.provider.name}' does not "
-                        f"support vision, but extractor requires VISUAL modality"
+                        f"support vision, but extractor requires {modality.value.upper()} modality"
                     ],
                 )
 
@@ -90,13 +95,13 @@ class CapabilityDetector:
     """Detects and reports available capabilities based on a plan."""
 
     @staticmethod
-    def detect_capabilities(plan: ExtractionPlan) -> Dict[str, Any]:
+    def detect_capabilities(plan: ExtractionPlan) -> dict[str, Any]:
         extractor_class = ExtractorRegistry.get_instance().get(plan.extractor.name)
         provider_class = ProviderRegistry.get_instance().get(plan.extractor.provider.name)
 
         modality = extractor_class.get_modality() if extractor_class else Modality.TEXT
 
-        provider_capabilities: Dict[str, Any] = {}
+        provider_capabilities: dict[str, Any] = {}
         if provider_class:
             provider = provider_class()
             provider.initialize(plan.extractor.provider)

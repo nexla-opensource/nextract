@@ -59,3 +59,17 @@ def test_extractor_provider_compatibility():
     result = PlanValidator.validate_extraction_plan(plan)
     assert result.valid is False
     assert "does not support provider" in result.errors[0]
+
+
+def test_hybrid_extractor_requires_vision_capable_provider():
+    plan = ExtractionPlan(
+        extractor=ExtractorConfig(
+            name="hybrid",
+            provider=ProviderConfig(name="local", model="llama3"),
+        ),
+        chunker=ChunkerConfig(name="hybrid"),
+    )
+
+    result = PlanValidator.validate_extraction_plan(plan)
+    assert result.valid is False
+    assert "support vision" in result.errors[0]

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import traceback
-from typing import Callable, List, TypeVar, Any, Optional
+from typing import Callable, TypeVar, Any
 from dataclasses import dataclass
 import structlog
 
@@ -32,8 +32,8 @@ class ProcessingError:
 @dataclass
 class BatchResult:
     """Result of batch processing"""
-    results: List[Any]
-    errors: List[ProcessingError]
+    results: list[Any]
+    errors: list[ProcessingError]
     successful_count: int
     failed_count: int
     total_count: int
@@ -42,7 +42,7 @@ class BatchResult:
 class ParallelProcessingError(Exception):
     """Raised when parallel processing encounters errors"""
     
-    def __init__(self, message: str, errors: List[ProcessingError]):
+    def __init__(self, message: str, errors: list[ProcessingError]):
         super().__init__(message)
         self.errors = errors
     
@@ -95,12 +95,12 @@ class ParallelProcessor:
     
     def process_batch(
         self,
-        items: List[T],
+        items: list[T],
         process_fn: Callable[[T], R],
-        batch_size: Optional[int] = None,
+        batch_size: int | None = None,
         fail_fast: bool = False,
         return_errors: bool = False
-    ) -> List[R] | BatchResult:
+    ) -> list[R] | BatchResult:
         """
         Process items in parallel batches.
         
@@ -137,7 +137,7 @@ class ParallelProcessor:
             # batch_result.errors = []
         """
         if not items:
-            raise ValueError("Cannot process empty list of items")
+            return BatchResult(results=[], errors=[], total_count=0, successful_count=0, failed_count=0)
         
         log.info(
             "parallel_processing_started",
@@ -194,7 +194,7 @@ class ParallelProcessor:
                 raise
         
         # Log final summary
-        successful_count = len(all_results) - len(all_errors)
+        successful_count = sum(1 for r in all_results if r is not None)
         log.info(
             "parallel_processing_completed",
             total_items=len(items),
@@ -202,7 +202,7 @@ class ParallelProcessor:
             failed=len(all_errors),
             success_rate=f"{successful_count/len(items)*100:.1f}%"
         )
-        
+
         # Return based on return_errors flag
         if return_errors:
             return BatchResult(
@@ -220,15 +220,15 @@ class ParallelProcessor:
                     error_count=len(all_errors),
                     message="Some items failed processing. Use return_errors=True to get error details."
                 )
-            return all_results
+            return [r for r in all_results if r is not None]
     
     def _process_single_batch(
         self,
-        batch: List[T],
+        batch: list[T],
         process_fn: Callable[[T], R],
         batch_start_idx: int,
         fail_fast: bool
-    ) -> tuple[List[R], List[ProcessingError]]:
+    ) -> tuple[list[R], list[ProcessingError]]:
         """
         Process a single batch in parallel.
         
@@ -313,7 +313,7 @@ class ParallelProcessor:
         process_fn: Callable[[T], R],
         item: T,
         item_index: int
-    ) -> tuple[Optional[R], Optional[ProcessingError]]:
+    ) -> tuple[R | None, ProcessingError | None]:
         """
         Safely process a single item, catching all exceptions.
         

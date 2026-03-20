@@ -7,16 +7,15 @@ from nextract.core.config import ChunkerConfig, ExtractionPlan, ExtractorConfig,
 
 DEFAULT_MODEL = os.getenv("NEXTRACT_MODEL", "openai:gpt-4o")  # vision-capable by default
 
-# Provider-specific default models (using latest as of December 2025)
-# Updated with the most current models from each provider
+# Provider-specific default models (updated March 2026)
 PROVIDER_DEFAULT_MODELS = {
-    "openai": "gpt-5.1-mini",  
-    "anthropic": "claude-haiku-4-5", 
-    "google": "gemini-3-flash-preview",  
-    "azure": "gpt-5.1-mini",  
-    "cohere": "command-a-03-2025",  
-    "aws": "anthropic.claude-haiku-4-5-20251001-v1:0",  
-    "local": "llama-3.2-vision",
+    "openai": "gpt-4o",
+    "anthropic": "claude-sonnet-4-20250514",
+    "google": "gemini-2.0-flash",
+    "aws": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "azure": "gpt-4o",
+    "local": "llama3",
+    "cohere": "command-r-plus",
 }
 
 DEFAULT_MAX_CONCURRENCY = int(os.getenv("NEXTRACT_MAX_CONCURRENCY", "4"))

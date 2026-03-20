@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import asyncio
 import base64
-from typing import Any, Dict, Optional
+from typing import Any
 
 import structlog
-from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
+from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
-from pydantic_ai import Agent, BinaryContent
+from pydantic_ai import Agent, BinaryContent, ModelSettings, StructuredDict, UsageLimits, capture_run_messages
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
 from nextract.core import BaseProvider, ProviderConfig, ProviderRequest, ProviderResponse
-from nextract.schema import build_output_type
+from nextract.core.model_capabilities import get_model_capability
+from nextract.schema import prepare_output_schema
 
 log = structlog.get_logger(__name__)
 
@@ -20,7 +20,7 @@ class PydanticAIProvider(BaseProvider):
     """Provider implementation backed by pydantic-ai Agent."""
 
     def __init__(self) -> None:
-        self.config: Optional[ProviderConfig] = None
+        self.config: ProviderConfig | None = None
 
     def initialize(self, config: ProviderConfig) -> None:
         self.config = config
@@ -29,17 +29,24 @@ class PydanticAIProvider(BaseProvider):
     def supports_vision(self) -> bool:
         if not self.config:
             return False
-        model = self.config.model.lower()
-        if "vision" in model or "gpt-4o" in model or "gpt-4" in model:
-            return True
-        if self.config.name in {"openai", "anthropic", "google", "azure", "local"}:
-            return True
-        return False
+        return get_model_capability(
+            model=self.config.model,
+            capability="vision",
+            default=False,
+            provider=self.config.name,
+        )
 
     def supports_structured_output(self) -> bool:
-        return True
+        if not self.config:
+            return True
+        return get_model_capability(
+            model=self.config.model,
+            capability="structured_output",
+            default=True,
+            provider=self.config.name,
+        )
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         return {
             "vision": self.supports_vision(),
             "structured_output": self.supports_structured_output(),
@@ -53,28 +60,51 @@ class PydanticAIProvider(BaseProvider):
 
         system_prompt, parts = self._build_parts(request)
         include_extra = bool(request.options.get("include_extra"))
-        output_type = build_output_type(request.schema, include_extra=include_extra) if request.schema else str
+        unwrap_key: str | None = None
+        if request.schema:
+            prepared_schema, unwrap_key = prepare_output_schema(
+                request.schema,
+                include_extra=include_extra,
+            )
+            output_type = StructuredDict(prepared_schema, name=prepared_schema.get("title", "Output"))
+        else:
+            output_type = str
+
+        # Build ModelSettings from config for timeout, temperature, max_tokens
+        model_settings = self._build_model_settings()
 
         agent = Agent(
             self._model_id(),
             output_type=output_type,
             system_prompt=system_prompt,
+            retries=2,  # Built-in output validation retries
+            model_settings=model_settings,
         )
 
-        result = asyncio.run(
-            self._run_with_retries(
-                agent,
-                parts,
-                timeout_s=self.config.timeout,
-                max_attempts=self.config.max_retries,
-            )
+        result = self._run_with_retries_sync(
+            agent,
+            parts,
+            max_attempts=self.config.max_retries,
         )
 
         usage = result.usage()
         output = result.output
 
-        structured_output = output if isinstance(output, dict) else None
-        text_output = output if isinstance(output, str) else ""
+        if isinstance(output, dict):
+            structured_output = output
+            text_output = ""
+        elif hasattr(output, "model_dump"):
+            structured_output = output.model_dump()
+            text_output = ""
+        elif isinstance(output, str):
+            structured_output = None
+            text_output = output
+        else:
+            structured_output = None
+            text_output = str(output) if output is not None else ""
+
+        if unwrap_key and isinstance(structured_output, dict) and unwrap_key in structured_output:
+            structured_output = structured_output[unwrap_key]
 
         return ProviderResponse(
             text=text_output,
@@ -148,21 +178,61 @@ class PydanticAIProvider(BaseProvider):
             return out
         return []
 
-    async def _run_with_retries(
+    def _run_with_retries_sync(
         self,
         agent: Agent,
         parts: list[str | BinaryContent],
-        timeout_s: float,
         max_attempts: int,
     ):
-        retrying = AsyncRetrying(
+        """Run agent with sync retries using pydantic-ai's run_sync method."""
+        # Build UsageLimits from config to prevent runaway token usage
+        usage_limits = self._build_usage_limits(max_attempts)
+
+        retrying = Retrying(
             reraise=True,
             stop=stop_after_attempt(max_attempts),
             wait=wait_random_exponential(multiplier=1, max=10),
             retry=retry_if_exception_type(
-                (ModelHTTPError, asyncio.TimeoutError, TimeoutError, UnexpectedModelBehavior)
+                (ModelHTTPError, TimeoutError, ConnectionError, OSError, UnexpectedModelBehavior)
             ),
         )
-        async for attempt in retrying:
+
+        for attempt in retrying:
             with attempt:
-                return await asyncio.wait_for(agent.run(parts), timeout=timeout_s)
+                try:
+                    with capture_run_messages() as messages:
+                        return agent.run_sync(parts, usage_limits=usage_limits)
+                except Exception as exc:
+                    log.error(
+                        "provider_run_failed",
+                        error=str(exc),
+                        messages_count=len(messages),
+                        attempt=attempt.retry_state.attempt_number,
+                    )
+                    raise
+
+    def _build_model_settings(self) -> ModelSettings | None:
+        """Build ModelSettings from provider config."""
+        if not self.config:
+            return None
+
+        return ModelSettings(
+            timeout=self.config.timeout if self.config.timeout else None,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens if self.config.max_tokens else None,
+        )
+
+    def _build_usage_limits(self, max_attempts: int) -> UsageLimits:
+        """Build UsageLimits from config to prevent runaway usage."""
+        # Allow retries plus some buffer for the request limit
+        request_limit = max_attempts * 2
+
+        # Get max total tokens from extra_params if specified
+        max_total_tokens = None
+        if self.config and self.config.extra_params:
+            max_total_tokens = self.config.extra_params.get("max_total_tokens")
+
+        return UsageLimits(
+            request_limit=request_limit,
+            total_tokens_limit=max_total_tokens,
+        )

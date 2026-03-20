@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
@@ -18,7 +18,7 @@ class LlamaIndexExtractor(BaseExtractor):
     SUPPORTED_PROVIDERS = ["openai", "anthropic", "local"]
 
     def __init__(self) -> None:
-        self.config: Optional[ExtractorConfig] = None
+        self.config: ExtractorConfig | None = None
         self._text = TextExtractor()
 
     def initialize(self, config: ExtractorConfig) -> None:
@@ -31,7 +31,7 @@ class LlamaIndexExtractor(BaseExtractor):
         return Modality.TEXT
 
     @classmethod
-    def get_supported_providers(cls) -> List[str]:
+    def get_supported_providers(cls) -> list[str]:
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:
@@ -46,8 +46,8 @@ class LlamaIndexExtractor(BaseExtractor):
         input_data: Any,
         provider: Any,
         prompt: str,
-        schema: Optional[Dict[str, Any]] = None,
-        examples: Optional[List[Dict[str, Any]]] = None,
+        schema: dict[str, Any] | None = None,
+        examples: list[dict[str, Any]] | None = None,
         include_extra: bool = False,
         **kwargs: Any,
     ) -> ExtractorResult:
@@ -99,7 +99,7 @@ class LlamaIndexExtractor(BaseExtractor):
         index = VectorStoreIndex.from_documents(documents)
         query_engine = index.as_query_engine()
         response = query_engine.query(prompt)
-        payload: Dict[str, Any] = {"response": str(response)}
+        payload: dict[str, Any] = {"response": str(response)}
 
         result = {
             "chunk_id": "llamaindex",

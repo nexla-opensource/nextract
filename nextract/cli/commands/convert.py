@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -17,23 +16,29 @@ def cli_convert(
     document: Path = typer.Argument(..., exists=True, readable=True),
     output_format: str = typer.Option("markdown", "--format", "-f"),
     theme: str = typer.Option("system", "--theme", help="Theme for HTML output: light, dark, or system"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o"),
+    output: Path | None = typer.Option(None, "--output", "-o"),
 ) -> None:
-    artifacts = load_documents([document])
-    if not artifacts:
-        raise typer.BadParameter("No documents provided")
+    try:
+        artifacts = load_documents([document])
+        if not artifacts:
+            raise typer.BadParameter("No documents provided")
 
-    text = extract_text(artifacts[0])
-    if text is None:
-        text = ""
+        text = extract_text(artifacts[0])
+        if text is None:
+            text = ""
 
-    formatter = _select_formatter(output_format)
-    result_payload = formatter.format(_build_result(text), theme=theme)
+        formatter = _select_formatter(output_format)
+        result_payload = formatter.format(_build_result(text), theme=theme)
 
-    if output:
-        output.write_text(result_payload)
-    else:
-        typer.echo(result_payload)
+        if output:
+            output.write_text(result_payload)
+        else:
+            typer.echo(result_payload)
+    except typer.BadParameter:
+        raise
+    except Exception as exc:
+        typer.echo(f"Conversion failed: {exc}", err=True)
+        raise typer.Exit(code=1)
 
 
 def _select_formatter(output_format: str):

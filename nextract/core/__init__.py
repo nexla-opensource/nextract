@@ -31,6 +31,11 @@ from .exceptions import (
     ProviderError,
     ValidationError,
 )
+from .model_capabilities import (
+    get_model_capability,
+    get_model_capabilities,
+    register_model_capability,
+)
 
 __all__ = [
     "BaseChunker",
@@ -63,18 +68,7 @@ __all__ = [
     "PlanError",
     "ProviderError",
     "ValidationError",
+    "get_model_capability",
+    "get_model_capabilities",
+    "register_model_capability",
 ]
-
-
-def extract(*args, **kwargs):
-    """Legacy extract entrypoint retained for backward compatibility."""
-    from nextract.legacy_core import extract as legacy_extract
-
-    return legacy_extract(*args, **kwargs)
-
-
-def batch_extract(*args, **kwargs):
-    """Legacy batch extraction entrypoint retained for backward compatibility."""
-    from nextract.legacy_core import batch_extract as legacy_batch_extract
-
-    return legacy_batch_extract(*args, **kwargs)

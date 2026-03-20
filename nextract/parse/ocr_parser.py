@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import structlog
 
 from nextract.core import DocumentArtifact
@@ -13,7 +15,7 @@ class OCRParser:
     """OCR parser for scanned PDFs or images."""
 
     def parse(self, document: DocumentArtifact) -> str | None:
-        if not is_pdf(__import__("pathlib").Path(document.source_path)):
+        if not is_pdf(Path(document.source_path)):
             log.warning("ocr_parser_non_pdf", file=document.source_path)
             return None
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import structlog
 
@@ -16,7 +16,7 @@ class EasyOCRProvider(BaseProvider):
     """OCR provider backed by EasyOCR."""
 
     def __init__(self) -> None:
-        self.config: Optional[ProviderConfig] = None
+        self.config: ProviderConfig | None = None
 
     def initialize(self, config: ProviderConfig) -> None:
         self.config = config
@@ -39,7 +39,7 @@ class EasyOCRProvider(BaseProvider):
         ocr_dpi = int(request.options.get("ocr_dpi", 300))
         languages = request.options.get("languages")
         if not languages and self.config:
-            languages = self.config.extra_params.get("languages")
+            languages = (self.config.extra_params or {}).get("languages")
         if not languages:
             languages = ["en"]
 
@@ -62,7 +62,7 @@ class EasyOCRProvider(BaseProvider):
     def supports_structured_output(self) -> bool:
         return False
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         return {
             "vision": True,
             "structured_output": False,

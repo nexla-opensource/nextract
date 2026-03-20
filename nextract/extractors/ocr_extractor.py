@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import base64
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
 from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality, ProviderRequest
+from nextract.extractors.fallback_mixin import OCRFallbackMixin
 from nextract.registry import ProviderRegistry, register_extractor
 
 log = structlog.get_logger(__name__)
 
 
 @register_extractor("ocr")
-class OCRExtractor(BaseExtractor):
+class OCRExtractor(OCRFallbackMixin, BaseExtractor):
     """OCR extractor for OCR-first workflows."""
 
     SUPPORTED_PROVIDERS = ["tesseract", "easyocr", "paddleocr"]
 
     def __init__(self) -> None:
-        self.config: Optional[ExtractorConfig] = None
+        self.config: ExtractorConfig | None = None
 
     def initialize(self, config: ExtractorConfig) -> None:
         self.config = config
@@ -29,7 +30,7 @@ class OCRExtractor(BaseExtractor):
         return Modality.VISUAL
 
     @classmethod
-    def get_supported_providers(cls) -> List[str]:
+    def get_supported_providers(cls) -> list[str]:
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:
@@ -47,8 +48,8 @@ class OCRExtractor(BaseExtractor):
         self,
         input_data: Any,
         provider: Any,
-        prompt: Optional[str] = None,
-        schema: Optional[Dict[str, Any]] = None,
+        prompt: str | None = None,
+        schema: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ExtractorResult:
         if not self.config:
@@ -57,7 +58,7 @@ class OCRExtractor(BaseExtractor):
         ocr_dpi = int(self.config.extractor_params.get("ocr_dpi", 300))
         language = self.config.extractor_params.get("language")
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         for idx, chunk in enumerate(input_data):
             images_b64 = self._chunk_to_images_b64(chunk)
@@ -103,26 +104,8 @@ class OCRExtractor(BaseExtractor):
             metadata={"modality": "visual", "num_chunks": len(input_data)},
         )
 
-    def _safe_generate(self, provider: Any, request: ProviderRequest):
-        try:
-            return provider.generate(request)
-        except Exception as exc:  # noqa: BLE001
-            if self.config and self.config.fallback_provider:
-                fallback_class = ProviderRegistry.get_instance().get(
-                    self.config.fallback_provider.name
-                )
-                if not fallback_class:
-                    raise
-                fallback = fallback_class()
-                fallback.initialize(self.config.fallback_provider)
-                log.warning(
-                    "ocr_fallback_provider", error=str(exc), provider=self.config.fallback_provider.name
-                )
-                return fallback.generate(request)
-            raise
-
-    def _chunk_to_images_b64(self, chunk: Any) -> List[str]:
-        images_b64: List[str] = []
+    def _chunk_to_images_b64(self, chunk: Any) -> list[str]:
+        images_b64: list[str] = []
 
         if hasattr(chunk, "images"):
             for image in getattr(chunk, "images", []):

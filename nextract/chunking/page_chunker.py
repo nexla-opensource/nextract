@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 import structlog
 
@@ -17,7 +16,7 @@ class PageBasedChunker(BaseChunker):
     """Chunk PDF pages for visual extractors."""
 
     @classmethod
-    def get_applicable_modalities(cls) -> List[Modality]:
+    def get_applicable_modalities(cls) -> list[Modality]:
         return [Modality.VISUAL, Modality.HYBRID]
 
     def validate_config(self, config: ChunkerConfig) -> bool:
@@ -27,7 +26,7 @@ class PageBasedChunker(BaseChunker):
             raise ValueError("page_overlap must be < pages_per_chunk")
         return True
 
-    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> List[DocumentChunk]:
+    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[DocumentChunk]:
         path = document.source_path
         document_path = Path(path)
 
@@ -57,43 +56,51 @@ class PageBasedChunker(BaseChunker):
             raise ImportError("PyMuPDF required for page chunking. Install with: pip install PyMuPDF") from exc
 
         doc = fitz.open(document_path)
-        total_pages = len(doc)
-        if total_pages == 0:
-            doc.close()
-            return []
+        try:
+            total_pages = len(doc)
+            if total_pages == 0:
+                return []
 
-        chunks: List[DocumentChunk] = []
-        start_page = 0
-        chunk_id = 0
+            chunks: list[DocumentChunk] = []
+            start_page = 0
+            chunk_id = 0
 
-        while start_page < total_pages:
-            end_page = min(start_page + config.pages_per_chunk, total_pages)
+            while start_page < total_pages:
+                prev_start = start_page
+                end_page = min(start_page + config.pages_per_chunk, total_pages)
 
-            chunk_doc = fitz.open()
-            chunk_doc.insert_pdf(doc, from_page=start_page, to_page=end_page - 1)
-            chunk_bytes = chunk_doc.tobytes()
-            chunk_doc.close()
+                chunk_doc = fitz.open()
+                try:
+                    chunk_doc.insert_pdf(doc, from_page=start_page, to_page=end_page - 1)
+                    chunk_bytes = chunk_doc.tobytes()
+                finally:
+                    chunk_doc.close()
 
-            chunks.append(
-                DocumentChunk(
-                    id=f"chunk_{chunk_id}",
-                    content=chunk_bytes,
-                    source_path=path,
-                    modality=Modality.VISUAL,
-                    metadata={
-                        "page_range": (start_page + 1, end_page),
-                        "total_pages": total_pages,
-                        "pages_in_chunk": end_page - start_page,
-                        "overlap_with_previous": config.page_overlap if chunk_id > 0 else 0,
-                        "media_type": "application/pdf",
-                    },
+                chunks.append(
+                    DocumentChunk(
+                        id=f"chunk_{chunk_id}",
+                        content=chunk_bytes,
+                        source_path=path,
+                        modality=Modality.VISUAL,
+                        metadata={
+                            "page_range": (start_page + 1, end_page),
+                            "total_pages": total_pages,
+                            "pages_in_chunk": end_page - start_page,
+                            "overlap_with_previous": config.page_overlap if chunk_id > 0 else 0,
+                            "media_type": "application/pdf",
+                        },
+                    )
                 )
-            )
 
-            start_page = end_page - config.page_overlap
-            chunk_id += 1
-
-        doc.close()
+                start_page = end_page - config.page_overlap
+                if end_page >= total_pages:
+                    break
+                # Also ensure forward progress
+                if start_page <= prev_start:
+                    break
+                chunk_id += 1
+        finally:
+            doc.close()
 
         log.info(
             "pdf_chunked",

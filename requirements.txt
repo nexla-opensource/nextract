@@ -1,22 +1,22 @@
 # Runtime dependencies
-pydantic>=2.7
-pydantic-ai>=0.10.0
-jsonschema>=4.19
-structlog>=24.1.0
-typer>=0.12.0
-tenacity>=8.2.3
-rich>=13.7
+pydantic>=2.10
+pydantic-ai>=1.0.0
+jsonschema>=4.23
+structlog>=24.4.0
+typer>=0.15.0
+tenacity>=9.0.0
+rich>=13.9
 
 # Document processing dependencies
-PyMuPDF>=1.23.0  # PDF processing and chunking
-tiktoken>=0.5.0  # Token counting for OpenAI models
-pytesseract>=0.3.10  # OCR text extraction from scanned PDFs
-pdf2image>=1.16.0  # Convert PDF pages to images for OCR
-pillow>=10.0.0  # Image processing for OCR
+PyMuPDF>=1.25.0
+tiktoken>=0.8.0
+pytesseract>=0.3.13
+pdf2image>=1.17.0
+pillow>=11.0.0
 
 # Development dependencies
-mypy>=1.7
-pytest>=7.0.0
-pytest-mock>=3.0.0
-pytest-asyncio>=0.21.0
-ruff>=0.1.0
+mypy>=1.14
+pytest>=8.0.0
+pytest-mock>=3.14.0
+pytest-asyncio>=1.0.0
+ruff>=0.9.0

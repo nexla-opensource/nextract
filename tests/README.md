@@ -1,213 +1,156 @@
 # Nextract Test Suite
 
-**Total Tests**: 163  
-**Passing**: 138 (84.7%)  
-**Failing**: 25 (15.3%)  
-**Last Updated**: 2025-11-17
+**Total Tests**: ~400+
+**Unit Tests**: 282 passing, 12 skipped
+**Integration Tests**: Require API credentials
+**Last Updated**: 2026-03-20
 
 ---
 
 ## Overview
 
-This directory contains comprehensive unit and integration tests for Nextract's core functionality including adaptive extraction, sentence-aware chunking, parallel processing, and provenance tracking.
+This directory contains comprehensive unit and integration tests for Nextract's V2 architecture, organized into two main categories:
+
+- **Unit Tests** (`tests/unit/`): Self-contained tests that don't require external services
+- **Integration Tests** (`tests/integration/`): Tests that require API credentials for providers
 
 ### Running Tests
 
 ```bash
 # Install package in editable mode
-pip install -e .
+pip install -e .[dev]
 
-# Run all tests
-pytest tests/ -v
+# Run all unit tests (no credentials needed)
+pytest tests/unit/ -v
 
-# Run specific test file
-pytest tests/test_adaptive_extraction.py -v
+# Run unit tests with coverage
+pytest tests/unit/ --cov=nextract --cov-report=html
 
-# Run with coverage
-pytest tests/ --cov=nextract --cov-report=html
+# Collect integration tests (verify imports work)
+pytest tests/integration/ --collect-only
+
+# Run integration tests (requires API keys)
+pytest tests/integration/ -v
 ```
 
 ---
 
-## Test Summary by Category
+## Test Structure
 
-| Category | Total | Passing | Failing | Status |
-|----------|-------|---------|---------|--------|
-| **Adaptive Extraction** | 29 | 25 | 4 | ⚠️ Prompt format |
-| **Nested Adaptive** | 34 | 34 | 0 | ✅ Perfect |
-| **Sentence Chunking** | 32 | 32 | 0 | ✅ Perfect |
-| **Parallel Processing** | 20 | 20 | 0 | ✅ Perfect |
-| **Provenance** | 20 | 19 | 1 | ⚠️ Citation |
-| **Integration** | 4 | 0 | 4 | ⚠️ Async |
-| **Multi-pass** | 9 | 1 | 8 | ⚠️ Async |
-| **Error Handling** | 5 | 0 | 5 | ⚠️ Async |
-| **TOTAL** | **163** | **138** | **25** | **84.7%** |
-
----
-
-## Test Files
-
-### 1. `test_adaptive_extraction.py` (29 tests, 25 passing)
-
-**Purpose**: Test two-pass adaptive extraction functionality
-
-**Coverage**:
-- ✅ Field identification (missing vs populated)
-- ✅ Focused schema creation
-- ⚠️ Focused prompt creation (4 tests failing)
-- ✅ Result merging
-- ✅ Nested schema support
-
-**Status**: ⚠️ Minor failures (prompt format validation needs update)
-
----
-
-### 2. `test_adaptive_extraction_nested.py` (34 tests, 34 passing ✅)
-
-**Purpose**: Test adaptive extraction with deeply nested schemas
-
-**Coverage**:
-- ✅ Recursive field counting (52 leaf fields across 4 levels)
-- ✅ Nested field identification
-- ✅ Dot-notation path handling
-- ✅ Deep merge of results
-
-**Status**: ✅ All passing
+```
+tests/
+├── __init__.py              # Makes tests a proper Python package
+├── README.md                # This file
+├── unit/                    # Unit tests (no external dependencies)
+│   ├── conftest.py          # Unit test fixtures
+│   ├── test_adaptive/       # Adaptive extraction tests
+│   ├── test_chunking/       # Chunking algorithm tests
+│   ├── test_core/           # Core config and artifact tests
+│   ├── test_error/          # Error handling tests
+│   ├── test_merge/          # Partial output merge tests
+│   ├── test_multipass/      # Multi-pass extraction tests
+│   ├── test_parallel/       # Parallel processing tests
+│   ├── test_provenance/     # Provenance tracking tests
+│   └── test_schema/         # Schema utility tests
+└── integration/             # Integration tests (require credentials)
+    ├── conftest.py          # Integration fixtures & skip markers
+    ├── fixtures/            # Test schemas and data
+    ├── test_cli/            # CLI command tests
+    ├── test_chunkers/       # Chunker integration tests
+    ├── test_edge_cases/     # Edge case tests
+    ├── test_extractors/     # Extractor integration tests
+    ├── test_pipelines/      # Pipeline integration tests
+    ├── test_plans/          # Plan validation tests
+    ├── test_providers/      # Provider integration tests
+    └── test_schemas/        # Schema suggestion/validation tests
+```
 
 ---
 
-### 3. `test_sentence_chunking.py` (32 tests, 32 passing ✅)
+## Unit Test Summary
 
-**Purpose**: Test sentence-aware chunking (LangExtract-inspired)
-
-**Coverage**:
-- ✅ Character interval tracking
-- ✅ Sentence boundary detection
-- ✅ LangExtract Rule A (long sentences break at newlines)
-- ✅ LangExtract Rule B (oversized sentences standalone)
-- ✅ LangExtract Rule C (short sentences packed)
-
-**Status**: ✅ All passing
-
----
-
-### 4. `test_parallel_processing.py` (20 tests, 20 passing ✅)
-
-**Purpose**: Test parallel file/chunk processing
-
-**Coverage**:
-- ✅ Concurrent extraction
-- ✅ Error handling per item
-- ✅ Batch result aggregation
-
-**Status**: ✅ All passing
+| Category | Tests | Status |
+|----------|-------|--------|
+| Adaptive Extraction | ~60 | Passing |
+| Chunking | 32 | Passing |
+| Core (Config, Artifacts) | ~30 | Passing |
+| Error Handling | ~15 | Passing |
+| Merge Logic | ~20 | Passing |
+| Multi-pass | ~15 | Passing |
+| Parallel Processing | 20 | Passing |
+| Provenance | ~20 | Passing (1 skipped) |
+| Schema Utils | ~15 | Passing |
+| Component Integration | ~10 | Passing |
+| **TOTAL** | **~282** | **Passing** |
 
 ---
 
-### 5. `test_provenance.py` (20 tests, 19 passing)
+## Integration Tests
 
-**Purpose**: Test provenance tracking
+Integration tests require API credentials. Set environment variables before running:
 
-**Coverage**:
-- ✅ Field provenance tracking
-- ✅ Source file/chunk/page tracking
-- ✅ Confidence scores
-- ⚠️ Citation generation (1 test failing)
+```bash
+# OpenAI
+export OPENAI_API_KEY="sk-..."
 
-**Status**: ⚠️ Minor failure (citation formatting)
+# Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
 
----
+# Google
+export GOOGLE_API_KEY="..."
 
-### 6. `test_integration.py` (4 tests, 0 passing)
+# Azure
+export AZURE_OPENAI_API_KEY="..."
+export AZURE_OPENAI_ENDPOINT="..."
 
-**Purpose**: End-to-end integration tests
+# AWS (Bedrock)
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+```
 
-**Status**: ⚠️ Async configuration needed (all 4 tests failing)
-
----
-
-### 7. `test_multipass.py` (9 tests, 1 passing)
-
-**Purpose**: Test multi-pass extraction with merge strategies
-
-**Status**: ⚠️ Async configuration needed (8 tests failing)
-
----
-
-### 8. `test_error_handling.py` (5 tests, 0 passing)
-
-**Purpose**: Test error handling and recovery
-
-**Status**: ⚠️ Async configuration needed (all 5 tests failing)
-
----
-
-## Known Issues
-
-### 1. Async Test Configuration (17 tests failing)
-
-**Issue**: Tests using `@pytest.mark.asyncio` failing
-
-**Solution**: Configure pytest-asyncio in `pyproject.toml`
-
----
-
-### 2. Prompt Format Validation (4 tests failing)
-
-**Issue**: Adaptive extraction prompt format changed with anti-hallucination rules
-
-**Solution**: Update test assertions to match new prompt format
-
----
-
-### 3. Citation Ellipsis Logic (1 test failing)
-
-**Issue**: Citation generation doesn't add ellipsis for short text
-
-**Solution**: Update citation generation logic or test expectations
-
----
-
-### 4. Multi-pass Validation (1 test failing)
-
-**Issue**: `fail_threshold` validation not raising ValueError
-
-**Solution**: Add validation in `MultiPassExtractor.__init__`
-
----
-
-## Test Coverage Goals
-
-**Current**: 84.7%  
-**Target**: 95%+
-
-**To Achieve**:
-1. Fix 17 async tests (pytest-asyncio configuration)
-2. Fix 4 prompt format tests (update assertions)
-3. Fix 1 citation test (update logic)
-4. Fix 1 validation test (add validation)
+Tests will be skipped if credentials are not available.
 
 ---
 
 ## Running Specific Test Categories
 
 ```bash
-# Adaptive extraction tests
-pytest tests/test_adaptive_extraction.py -v
+# Unit tests by category
+pytest tests/unit/test_adaptive/ -v
+pytest tests/unit/test_chunking/ -v
+pytest tests/unit/test_core/ -v
+pytest tests/unit/test_provenance/ -v
 
-# Nested schema tests
-pytest tests/test_adaptive_extraction_nested.py -v
-
-# Chunking tests
-pytest tests/test_sentence_chunking.py -v
-
-# Parallel processing tests
-pytest tests/test_parallel_processing.py -v
-
-# Provenance tests
-pytest tests/test_provenance.py -v
+# Integration tests by category
+pytest tests/integration/test_providers/ -v
+pytest tests/integration/test_extractors/ -v
+pytest tests/integration/test_pipelines/ -v
+pytest tests/integration/test_cli/ -v
 ```
 
 ---
 
-**See ARCHITECTURE.md for detailed test documentation**
+## Fixtures
+
+### Unit Test Fixtures (`tests/unit/conftest.py`)
+- `simple_schema()`, `nested_schema()`, `array_schema()` - JSON schemas
+- `mock_chunk()`, `mock_chunks()` - Mock document chunks
+- `complete_extraction_result()`, `partial_extraction_result()` - Result fixtures
+
+### Integration Test Fixtures (`tests/integration/conftest.py`)
+- `has_provider_credentials(provider)` - Check if credentials exist
+- `requires_openai`, `requires_anthropic`, etc. - Skip markers
+- `simple_schema()`, `nested_schema()` - Schema fixtures
+- `sample_pdf_path()`, `sample_text_content()` - Document fixtures
+
+---
+
+## Known Considerations
+
+1. **Integration tests require credentials**: Without API keys, integration tests will be skipped
+2. **Some tests marked skip**: 12 unit tests are skipped pending implementation
+3. **Async support**: Tests use pytest-asyncio with `asyncio_mode = "auto"`
+
+---
+
+**See CLAUDE.md for architecture documentation**

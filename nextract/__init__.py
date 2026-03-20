@@ -2,28 +2,36 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    from importlib.metadata import PackageNotFoundError, version
-except Exception:  # pragma: no cover - fallback for older importlib
-    version = None
-    PackageNotFoundError = Exception
+from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("nextract") if version else "unknown"
+    __version__ = version("nextract")
 except PackageNotFoundError:
     __version__ = "unknown"
 
 from nextract.config import get_default_model_for_provider  # noqa: E402
 from nextract.core import (  # noqa: E402
+    BaseChunker,
+    BaseExtractor,
+    BaseFormatter,
+    BaseProvider,
     ChunkerConfig,
     ExtractionPlan,
+    ExtractionResult,
     ExtractorConfig,
     Modality,
     ProviderConfig,
 )
 from nextract.output import CsvFormatter, HtmlFormatter, JsonFormatter, MarkdownFormatter  # noqa: E402
 from nextract.pipeline import BatchExtractionResult, BatchPipeline, ExtractionPipeline  # noqa: E402
-from nextract.registry import ChunkerRegistry, ExtractorRegistry, ProviderRegistry  # noqa: E402
+from nextract.registry import (  # noqa: E402
+    ChunkerRegistry,
+    ExtractorRegistry,
+    ProviderRegistry,
+    register_chunker,
+    register_extractor,
+    register_provider,
+)
 from nextract.schema import SchemaGenerator, SchemaSuggestion  # noqa: E402
 
 
@@ -94,12 +102,17 @@ def get_available_chunkers(extractor_name: str) -> list[str]:
 
 
 __all__ = [
+    "BaseChunker",
+    "BaseExtractor",
+    "BaseFormatter",
+    "BaseProvider",
     "BatchPipeline",
     "BatchExtractionResult",
     "ChunkerConfig",
     "CsvFormatter",
     "ExtractionPipeline",
     "ExtractionPlan",
+    "ExtractionResult",
     "ExtractorConfig",
     "HtmlFormatter",
     "JsonFormatter",
@@ -115,5 +128,9 @@ __all__ = [
     "extract",
     "extract_simple",
     "get_available_chunkers",
+    "get_default_model_for_provider",
+    "register_chunker",
+    "register_extractor",
+    "register_provider",
     "__version__",
 ]

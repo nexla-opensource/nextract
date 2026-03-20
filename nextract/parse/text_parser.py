@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
@@ -21,7 +21,7 @@ def _read_text_file(path: Path) -> str:
         return data.decode("latin-1", errors="replace")
 
 
-def extract_text(document: DocumentArtifact, enable_ocr: bool = True) -> Optional[str]:
+def extract_text(document: DocumentArtifact, enable_ocr: bool = True) -> str | None:
     """Extract text from a document artifact when possible."""
     path = Path(document.source_path)
 
@@ -48,5 +48,9 @@ def extract_text(document: DocumentArtifact, enable_ocr: bool = True) -> Optiona
             except Exception as exc:  # noqa: BLE001
                 log.warning("office_pdf_text_extraction_failed", file=str(path), error=str(exc))
                 return None
+            finally:
+                # Clean up temporary PDF conversion directory
+                if pdf_path.parent.name.startswith("nextract-"):
+                    shutil.rmtree(pdf_path.parent, ignore_errors=True)
 
     return None

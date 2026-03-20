@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import structlog
 
@@ -16,7 +16,7 @@ class TesseractProvider(BaseProvider):
     """OCR provider backed by Tesseract."""
 
     def __init__(self) -> None:
-        self.config: Optional[ProviderConfig] = None
+        self.config: ProviderConfig | None = None
 
     def initialize(self, config: ProviderConfig) -> None:
         self.config = config
@@ -32,7 +32,7 @@ class TesseractProvider(BaseProvider):
         ocr_dpi = int(request.options.get("ocr_dpi", 300))
         language = request.options.get("language")
         if not language and self.config:
-            language = self.config.extra_params.get("language")
+            language = (self.config.extra_params or {}).get("language")
 
         images = decode_images(request.images, ocr_dpi=ocr_dpi)
         if not images:
@@ -54,7 +54,7 @@ class TesseractProvider(BaseProvider):
     def supports_structured_output(self) -> bool:
         return False
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         return {
             "vision": True,
             "structured_output": False,

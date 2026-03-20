@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .base import Modality
 
@@ -12,9 +12,9 @@ class DocumentArtifact:
 
     source_path: str
     mime_type: str
-    content: Optional[bytes] = None
-    text: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    content: bytes | None = None
+    text: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -36,8 +36,8 @@ class DocumentChunk:
     content: str | bytes
     source_path: str
     modality: Modality
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    char_interval: Optional[CharInterval] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    char_interval: CharInterval | None = None
 
 
 @dataclass
@@ -47,8 +47,8 @@ class TextChunk:
     id: str
     text: str
     source_path: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    char_interval: Optional[CharInterval] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    char_interval: CharInterval | None = None
 
 
 @dataclass
@@ -56,10 +56,10 @@ class ImageChunk:
     """Image chunk for visual extractors."""
 
     id: str
-    images: List[Any]
+    images: list[Any]
     source_path: str
-    page_range: Tuple[int, int]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    page_range: tuple[int, int]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -68,8 +68,8 @@ class Citation:
 
     source_path: str
     chunk_id: str
-    span: Optional[CharInterval] = None
-    snippet: Optional[str] = None
+    span: CharInterval | None = None
+    snippet: str | None = None
 
 
 @dataclass
@@ -77,7 +77,7 @@ class ConfidenceScore:
     """Confidence score with optional rationale."""
 
     value: float
-    rationale: Optional[str] = None
+    rationale: str | None = None
 
 
 @dataclass
@@ -86,8 +86,8 @@ class FieldResult:
 
     name: str
     value: Any
-    confidence: Optional[ConfidenceScore] = None
-    citations: List[Citation] = field(default_factory=list)
+    confidence: ConfidenceScore | None = None
+    citations: list[Citation] = field(default_factory=list)
 
 
 @dataclass
@@ -96,8 +96,8 @@ class ExtractorResult:
 
     name: str
     provider_name: str
-    results: List[Dict[str, Any]]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    results: list[dict[str, Any]]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -105,8 +105,8 @@ class ExtractionResult:
     """Normalized extraction result with metadata."""
 
     data: Any
-    field_metadata: Dict[str, FieldResult] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    field_metadata: dict[str, FieldResult] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -114,6 +114,6 @@ class ValidationResult:
     """Validation output for structured data."""
 
     valid: bool
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)

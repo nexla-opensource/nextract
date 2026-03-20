@@ -8,7 +8,7 @@ confidence scores and text citations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Any, Dict
+from typing import Any
 import structlog
 
 log = structlog.get_logger(__name__)
@@ -35,13 +35,13 @@ class FieldProvenance:
     """
     field_name: str
     field_value: Any
-    source_page: Optional[int] = None
-    source_chunk: Optional[int] = None
-    source_file: Optional[str] = None
+    source_page: int | None = None
+    source_chunk: int | None = None
+    source_file: str | None = None
     confidence: float = 1.0
-    citation: Optional[str] = None
+    citation: str | None = None
     extraction_method: str = "text"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
         """Validate confidence score"""
@@ -97,7 +97,7 @@ class ProvenanceTracker:
     
     def __init__(self):
         """Initialize provenance tracker"""
-        self.provenance_map: Dict[str, FieldProvenance] = {}
+        self.provenance_map: dict[str, FieldProvenance] = {}
         log.debug("provenance_tracker_initialized")
     
     def track_field(
@@ -107,11 +107,11 @@ class ProvenanceTracker:
         chunk: Any = None,  # DocumentChunk
         confidence: float = 1.0,
         extraction_method: str = "text",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict[str, Any] | None = None
     ) -> FieldProvenance:
         """
         Track provenance for a single field.
-        
+
         Args:
             field_name: Name of the field
             value: Extracted value
@@ -184,7 +184,7 @@ class ProvenanceTracker:
         chunk: Any = None,
         confidence: float = 1.0,
         extraction_method: str = "text",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict[str, Any] | None = None
     ) -> FieldProvenance:
         """
         Track provenance for a nested field (e.g., "address.city").
@@ -209,7 +209,7 @@ class ProvenanceTracker:
             metadata=metadata
         )
     
-    def get_provenance(self, field_name: str) -> Optional[FieldProvenance]:
+    def get_provenance(self, field_name: str) -> FieldProvenance | None:
         """
         Get provenance for a specific field.
         
@@ -221,7 +221,7 @@ class ProvenanceTracker:
         """
         return self.provenance_map.get(field_name)
     
-    def get_all_provenance(self) -> Dict[str, FieldProvenance]:
+    def get_all_provenance(self) -> dict[str, FieldProvenance]:
         """
         Get provenance for all tracked fields.
         
@@ -230,7 +230,7 @@ class ProvenanceTracker:
         """
         return self.provenance_map.copy()
     
-    def to_dict(self) -> Dict[str, dict]:
+    def to_dict(self) -> dict[str, dict]:
         """
         Convert all provenance to dictionary format.
         
@@ -280,7 +280,7 @@ class ProvenanceTracker:
             total_fields=len(self.provenance_map)
         )
     
-    def _generate_citation(self, content: Any, value: Any, context_chars: int = 50) -> Optional[str]:
+    def _generate_citation(self, content: Any, value: Any, context_chars: int = 50) -> str | None:
         """
         Generate a text citation showing context around the value.
         

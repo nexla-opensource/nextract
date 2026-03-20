@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List
-
 import structlog
 
 from nextract.core import BaseChunker, CharInterval, ChunkerConfig, DocumentArtifact, Modality, TextChunk
@@ -16,7 +14,7 @@ class FixedSizeChunker(BaseChunker):
     """Fixed-size chunker for text extractors."""
 
     @classmethod
-    def get_applicable_modalities(cls) -> List[Modality]:
+    def get_applicable_modalities(cls) -> list[Modality]:
         return [Modality.TEXT, Modality.HYBRID]
 
     def validate_config(self, config: ChunkerConfig) -> bool:
@@ -26,7 +24,7 @@ class FixedSizeChunker(BaseChunker):
             raise ValueError("chunk_overlap must be < chunk_size")
         return True
 
-    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> List[TextChunk]:
+    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[TextChunk]:
         text = extract_text(document)
         if not text:
             log.warning("fixed_size_chunker_no_text", file=document.source_path)
@@ -34,7 +32,11 @@ class FixedSizeChunker(BaseChunker):
 
         chunk_size = max(config.min_chunk_size, config.chunk_size)
         overlap = min(config.chunk_overlap, max(0, chunk_size - 1))
-        chunks: List[TextChunk] = []
+        chunks: list[TextChunk] = []
+
+        step = chunk_size - overlap
+        if step < 1:
+            step = max(1, chunk_size // 2)
 
         start = 0
         chunk_id = 0
@@ -51,9 +53,7 @@ class FixedSizeChunker(BaseChunker):
                 )
             )
             chunk_id += 1
-            start = end - overlap
-            if start < 0:
-                start = 0
+            start += step
             if start >= len(text):
                 break
 

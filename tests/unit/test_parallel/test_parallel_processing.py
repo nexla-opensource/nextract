@@ -38,34 +38,55 @@ class TestParallelProcessor:
         assert results == [2, 4, 6, 8, 10]
     
     def test_process_batch_empty_list(self):
-        """Test processing empty list raises error"""
+        """Test processing empty list returns empty result"""
         processor = ParallelProcessor(max_workers=4)
-        
-        with pytest.raises(ValueError, match="Cannot process empty list"):
-            processor.process_batch(items=[], process_fn=lambda x: x)
+
+        result = processor.process_batch(items=[], process_fn=lambda x: x)
+        assert result.results == []
+        assert result.errors == []
+        assert result.total_count == 0
+        assert result.successful_count == 0
     
     def test_process_batch_with_errors_continue(self):
-        """Test batch processing continues on errors"""
+        """Test batch processing continues on errors, filtering out failed items"""
         processor = ParallelProcessor(max_workers=4)
-        
+
         def process_fn(x):
             if x == 3:
                 raise ValueError(f"Error processing {x}")
             return x * 2
-        
+
         items = [1, 2, 3, 4, 5]
         results = processor.process_batch(
             items=items,
             process_fn=process_fn,
             fail_fast=False
         )
-        
-        # Should have None for failed item
-        assert results[0] == 2
-        assert results[1] == 4
-        assert results[2] is None  # Failed
-        assert results[3] == 8
-        assert results[4] == 10
+
+        # Without return_errors, failed items are filtered out
+        assert len(results) == 4
+        assert sorted(results) == [2, 4, 8, 10]
+
+    def test_process_batch_with_errors_return_errors(self):
+        """Test batch processing with return_errors=True preserves error info"""
+        processor = ParallelProcessor(max_workers=4)
+
+        def process_fn(x):
+            if x == 3:
+                raise ValueError(f"Error processing {x}")
+            return x * 2
+
+        items = [1, 2, 3, 4, 5]
+        result = processor.process_batch(
+            items=items,
+            process_fn=process_fn,
+            fail_fast=False,
+            return_errors=True
+        )
+
+        assert result.successful_count == 4
+        assert result.total_count == 5
+        assert len(result.errors) == 1
     
     def test_process_batch_fail_fast(self):
         """Test batch processing with fail_fast=True"""

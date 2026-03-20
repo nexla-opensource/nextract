@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich import print_json
@@ -19,26 +18,33 @@ def cli_suggest_schema(
     samples: list[Path] = typer.Argument(..., exists=True, readable=True),
     prompt: str = typer.Option(..., "--prompt", "-p"),
     provider: str = typer.Option("openai", "--provider"),
-    model: Optional[str] = typer.Option(None, "--model"),
-    examples: Optional[Path] = typer.Option(None, "--examples"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o"),
+    model: str | None = typer.Option(None, "--model"),
+    examples: Path | None = typer.Option(None, "--examples"),
+    output: Path | None = typer.Option(None, "--output", "-o"),
 ) -> None:
-    if model is None:
-        model = get_default_model_for_provider(provider)
-    provider_config = ProviderConfig(name=provider, model=model)
-    generator = SchemaGenerator(provider=provider_config)
+    try:
+        if model is None:
+            model = get_default_model_for_provider(provider)
+        provider_config = ProviderConfig(name=provider, model=model)
+        generator = SchemaGenerator(provider=provider_config)
 
-    examples_data = None
-    if examples:
-        examples_data = json.loads(examples.read_text())
+        examples_data = None
+        if examples:
+            examples_data = json.loads(examples.read_text())
 
-    schema = generator.suggest_schema(
-        sample_documents=[str(sample) for sample in samples],
-        prompt=prompt,
-        examples=examples_data,
-    )
+        schema = generator.suggest_schema(
+            sample_documents=[str(sample) for sample in samples],
+            prompt=prompt,
+            examples=examples_data,
+        )
 
-    if output:
-        generator.save_schema(schema, output)
-    else:
-        print_json(data=schema)
+        if output:
+            generator.save_schema(schema, output)
+        else:
+            print_json(data=schema)
+    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.echo(f"Schema suggestion failed: {exc}", err=True)
+        raise typer.Exit(code=1)
