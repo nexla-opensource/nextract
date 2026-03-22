@@ -5,7 +5,7 @@ from pathlib import Path
 import structlog
 
 from nextract.core import BaseChunker, ChunkerConfig, DocumentArtifact, DocumentChunk, Modality
-from nextract.mimetypes_map import guess_mime, is_pdf, is_image
+from nextract.mimetypes_map import guess_mime, is_pdf, is_image, is_audio, is_video
 from nextract.registry import register_chunker
 
 log = structlog.get_logger(__name__)
@@ -46,6 +46,10 @@ class PageBasedChunker(BaseChunker):
                     },
                 )
             ]
+
+        if is_audio(document_path) or is_video(document_path):
+            from nextract.chunking import _media_passthrough_chunk
+            return _media_passthrough_chunk(document, document_path)
 
         if not is_pdf(document_path):
             raise ValueError("PageBasedChunker only supports PDFs or images")

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import structlog
 
-from nextract.core import BaseChunker, CharInterval, ChunkerConfig, DocumentArtifact, Modality, TextChunk
+from nextract.core import BaseChunker, CharInterval, ChunkerConfig, DocumentArtifact, DocumentChunk, Modality, TextChunk
+from nextract.mimetypes_map import is_audio, is_video
 from nextract.parse import extract_text
 from nextract.registry import register_chunker
 from nextract.sentence_chunking import SentenceAwareChunker
@@ -23,9 +26,13 @@ class SemanticChunker(BaseChunker):
             raise ValueError(f"chunk_size must be >= {config.min_chunk_size}")
         return True
 
-    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[TextChunk]:
+    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[TextChunk | DocumentChunk]:
         text = extract_text(document)
         if not text:
+            path = Path(document.source_path)
+            if is_audio(path) or is_video(path):
+                from nextract.chunking import _media_passthrough_chunk
+                return _media_passthrough_chunk(document, path)
             log.warning("semantic_chunker_no_text", file=document.source_path)
             return []
 

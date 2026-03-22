@@ -6,7 +6,7 @@ from pathlib import Path
 from nextract.chunking.page_chunker import PageBasedChunker
 from nextract.chunking.semantic_chunker import SemanticChunker
 from nextract.core import BaseChunker, ChunkerConfig, DocumentArtifact, DocumentChunk, Modality, TextChunk
-from nextract.mimetypes_map import is_pdf, is_image
+from nextract.mimetypes_map import is_pdf, is_image, is_audio, is_video
 from nextract.registry import register_chunker
 
 
@@ -29,6 +29,9 @@ class HybridChunker(BaseChunker):
 
     def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[DocumentChunk | TextChunk]:
         path = Path(document.source_path)
+        if is_audio(path) or is_video(path):
+            from nextract.chunking import _media_passthrough_chunk
+            return _media_passthrough_chunk(document, path)
         if is_pdf(path) or is_image(path):
             visual_chunks = self._tag_chunks(
                 self._page_chunker.chunk(document, config),

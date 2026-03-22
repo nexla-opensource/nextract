@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from pydantic_ai import BinaryContent
-from .mimetypes_map import guess_mime, is_textual, is_pdf, is_image, is_zip, is_office_binary
+from .mimetypes_map import guess_mime, is_textual, is_pdf, is_image, is_zip, is_office_binary, is_audio, is_video
 
 import structlog
 
@@ -334,6 +334,11 @@ def _prepare_single_file(path: Path) -> list[PreparedPart]:
         return parts
 
     if is_image(path):
+        bc = BinaryContent(data=path.read_bytes(), media_type=mime)
+        parts.append(PreparedPart(binary=bc, source_path=path))
+        return parts
+
+    if is_audio(path) or is_video(path):
         bc = BinaryContent(data=path.read_bytes(), media_type=mime)
         parts.append(PreparedPart(binary=bc, source_path=path))
         return parts

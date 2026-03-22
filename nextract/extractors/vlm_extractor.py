@@ -77,7 +77,7 @@ class VLMExtractor(FallbackMixin, BaseExtractor):
                 if isinstance(data, bytes):
                     media_type = (chunk.metadata or {}).get("media_type") if hasattr(chunk, "metadata") else None
                     binary_parts.append(
-                        BinaryContent(data=data, media_type=media_type or "application/pdf")
+                        BinaryContent(data=data, media_type=media_type or "application/octet-stream")
                     )
                 else:
                     messages_text = str(data)
