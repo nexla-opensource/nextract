@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Sequence
 
 from jsonschema import Draft202012Validator, ValidationError
 from tenacity import AsyncRetrying, stop_after_attempt, wait_random_exponential, retry_if_exception_type
@@ -76,14 +76,14 @@ def _collect_required_empty_errors(value: Any, schema: dict[str, Any], path: lis
 @dataclass
 class ExtractionMetrics:
     usage: RunUsage
-    cost_estimate_usd: Optional[float]
+    cost_estimate_usd: float | None
 
 @dataclass
 class ExtractionReport:
     model: str
     files: list[str]
     usage: dict[str, Any]
-    cost_estimate_usd: Optional[float] = None
+    cost_estimate_usd: float | None = None
     warnings: list[str] = None  # type: ignore[assignment]
 
 def _attach_jsonschema_validator(agent: Agent, schema: JsonSchema, max_validation_rounds: int = 2) -> None:
@@ -167,9 +167,9 @@ async def run_extraction_async(
     *,
     config: RuntimeConfig,
     files: Sequence[str],
-    schema_or_model: Union[JsonSchema, PydModelType],
-    user_prompt: Optional[str],
-    examples: Optional[Sequence[dict[str, Any] | tuple[Optional[str], dict[str, Any]]]],
+    schema_or_model: JsonSchema | PydModelType,
+    user_prompt: str | None,
+    examples: Sequence[dict[str, Any] | tuple[str | None, dict[str, Any]]] | None,
     include_extra: bool,
     return_pydantic: bool = False,
 ) -> tuple[Any, ExtractionReport]:
@@ -273,7 +273,7 @@ async def run_improvement_async(
     *,
     config: RuntimeConfig,
     current_schema: JsonSchema,
-    user_prompt: Optional[str],
+    user_prompt: str | None,
     batch_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Ask the model to suggest an improved schema and user prompt using batch outputs."""

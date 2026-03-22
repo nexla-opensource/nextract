@@ -3,7 +3,21 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from nextract.core.config import ChunkerConfig, ExtractionPlan, ExtractorConfig, ProviderConfig
+
 DEFAULT_MODEL = os.getenv("NEXTRACT_MODEL", "openai:gpt-4o")  # vision-capable by default
+
+# Provider-specific default models (updated March 2026)
+PROVIDER_DEFAULT_MODELS = {
+    "openai": "gpt-4o",
+    "anthropic": "claude-sonnet-4-20250514",
+    "google": "gemini-2.0-flash",
+    "aws": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "azure": "gpt-4o",
+    "local": "llama3",
+    "cohere": "command-r-plus",
+}
+
 DEFAULT_MAX_CONCURRENCY = int(os.getenv("NEXTRACT_MAX_CONCURRENCY", "4"))
 DEFAULT_MAX_RUN_RETRIES = int(os.getenv("NEXTRACT_MAX_RUN_RETRIES", "5"))
 DEFAULT_PER_CALL_TIMEOUT_SECS = float(os.getenv("NEXTRACT_PER_CALL_TIMEOUT_SECS", "120"))
@@ -46,3 +60,35 @@ class RuntimeConfig:
 
 def load_runtime_config() -> RuntimeConfig:
     return RuntimeConfig()
+
+
+def get_default_model_for_provider(provider: str) -> str:
+    """Get the default model for a given provider.
+
+    Args:
+        provider: Provider name (e.g., "openai", "anthropic", "google")
+
+    Returns:
+        Default model name for that provider
+
+    Raises:
+        ValueError: If provider is not recognized
+    """
+    if provider not in PROVIDER_DEFAULT_MODELS:
+        raise ValueError(
+            f"Unknown provider '{provider}'. "
+            f"Supported providers: {', '.join(PROVIDER_DEFAULT_MODELS.keys())}"
+        )
+    return PROVIDER_DEFAULT_MODELS[provider]
+
+
+__all__ = [
+    "RuntimeConfig",
+    "load_runtime_config",
+    "ProviderConfig",
+    "ExtractorConfig",
+    "ChunkerConfig",
+    "ExtractionPlan",
+    "get_default_model_for_provider",
+    "PROVIDER_DEFAULT_MODELS",
+]

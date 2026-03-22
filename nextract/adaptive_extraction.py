@@ -576,12 +576,7 @@ def merge_extraction_results(
         if not is_empty_value(pass2_value) and pass2_value != pass1_value:
             set_nested_value(merged, dot_path, pass2_value)
             improvements += 1
-            log.debug(
-                "field_improved",
-                field=dot_path,
-                pass1_value=pass1_value,
-                pass2_value=pass2_value
-            )
+            log.debug("field_improved", field=dot_path)
 
     log.info(
         "extraction_results_merged",

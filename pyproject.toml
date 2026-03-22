@@ -61,3 +61,14 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "unit: marks test as unit test (fast, no external dependencies)",
+    "integration: marks test as integration test (exercises real code paths)",
+    "slow: marks tests as slow (>10 seconds, typically involving multiple API calls)",
+    "requires_openai: requires OpenAI API credentials",
+    "requires_anthropic: requires Anthropic API credentials",
+    "requires_google: requires Google/Gemini API credentials",
+    "requires_azure: requires Azure OpenAI credentials",
+    "requires_aws: requires AWS credentials",
+    "requires_cohere: requires Cohere API credentials",
+]

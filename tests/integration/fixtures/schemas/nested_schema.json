@@ -1,0 +1,54 @@
+{
+  "type": "object",
+  "title": "NestedDocument",
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "document_id": {"type": "string"},
+        "version": {"type": "string"},
+        "created_by": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "email": {"type": "string"},
+            "department": {
+              "type": "object",
+              "properties": {
+                "name": {"type": "string"},
+                "code": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "content": {
+      "type": "object",
+      "properties": {
+        "title": {"type": "string"},
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "heading": {"type": "string"},
+              "body": {"type": "string"},
+              "subsections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "subheading": {"type": "string"},
+                    "content": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["metadata", "content"]
+}

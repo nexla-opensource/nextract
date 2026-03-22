@@ -23,7 +23,6 @@ _CUSTOM: dict[str, str] = {
 
 _TEXTUAL_EXTS = {
     ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".html", ".htm",
-    ".xls", ".xlsx",
 }
 
 _IMAGE_EXTS = {
@@ -32,11 +31,21 @@ _IMAGE_EXTS = {
 
 _PDF_EXTS = {".pdf"}
 
+_AUDIO_EXTS = {
+    ".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a", ".wma", ".opus",
+}
+
+_VIDEO_EXTS = {
+    ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".mpeg", ".mpg", ".m4v",
+}
+
 _ZIP_EXTS = {".zip"}
 
 _UNSUPPORTED_BUT_ACCEPTABLE_AS_BINARY = {
     # Office documents that we convert to PDF before sending to LLMs
     ".doc", ".docx", ".ppt", ".pptx",
+    # Spreadsheets are binary formats, not textual
+    ".xls", ".xlsx",
 }
 
 def guess_mime(path: Path) -> str:
@@ -57,6 +66,16 @@ def is_pdf(path: Path) -> bool:
 
 def is_zip(path: Path) -> bool:
     return path.suffix.lower() in _ZIP_EXTS
+
+def is_audio(path: Path) -> bool:
+    return path.suffix.lower() in _AUDIO_EXTS
+
+def is_video(path: Path) -> bool:
+    return path.suffix.lower() in _VIDEO_EXTS
+
+def is_media(path: Path) -> bool:
+    """Audio or video file."""
+    return is_audio(path) or is_video(path)
 
 def is_office_binary(path: Path) -> bool:
     return path.suffix.lower() in _UNSUPPORTED_BUT_ACCEPTABLE_AS_BINARY

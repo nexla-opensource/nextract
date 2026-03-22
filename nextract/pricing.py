@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Optional
 
 from pydantic_ai.usage import RunUsage
 
@@ -30,7 +29,7 @@ def parse_pricing_json(json_str: str) -> dict[str, ModelPricing]:
             continue
     return out
 
-def estimate_cost_usd(usage: RunUsage, model_name: str, pricing_map: dict[str, ModelPricing]) -> Optional[float]:
+def estimate_cost_usd(usage: RunUsage, model_name: str, pricing_map: dict[str, ModelPricing]) -> float | None:
     mp = pricing_map.get(model_name)
     if not mp:
         return None

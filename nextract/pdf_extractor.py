@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
@@ -27,7 +26,7 @@ class PDFTextExtractor:
     
     def __init__(
         self,
-        analyzer: Optional[PDFAnalyzer] = None,
+        analyzer: PDFAnalyzer | None = None,
         enable_ocr: bool = True,
         ocr_dpi: int = 300,
         include_page_numbers: bool = True,
@@ -120,22 +119,23 @@ class PDFTextExtractor:
             raise ImportError("PyMuPDF required. Install with: pip install PyMuPDF")
         
         log.debug("extracting_with_pymupdf", file=str(pdf_path))
-        
+
         doc = fitz.open(pdf_path)
-        text_parts = []
-        
-        for page_num, page in enumerate(doc, 1):
-            page_text = page.get_text()
-            
-            if page_text.strip():
-                if self.include_page_numbers:
-                    text_parts.append(f"--- PAGE {page_num} ---\n{page_text}")
-                else:
-                    text_parts.append(page_text)
-        
-        doc.close()
-        
-        return "\n\n".join(text_parts)
+        try:
+            text_parts = []
+
+            for page_num, page in enumerate(doc, 1):
+                page_text = page.get_text()
+
+                if page_text.strip():
+                    if self.include_page_numbers:
+                        text_parts.append(f"--- PAGE {page_num} ---\n{page_text}")
+                    else:
+                        text_parts.append(page_text)
+
+            return "\n\n".join(text_parts)
+        finally:
+            doc.close()
     
     def _extract_with_tesseract(self, pdf_path: Path) -> str:
         """Extract text using Tesseract OCR (slow, for scanned PDFs)."""
@@ -266,55 +266,56 @@ class PDFTextExtractor:
             )
         
         log.debug("extracting_with_hybrid", file=str(pdf_path))
-        
+
         doc = fitz.open(pdf_path)
-        text_parts = []
-        
-        for page_num, page in enumerate(doc, 1):
-            # Try PyMuPDF first
-            page_text = page.get_text().strip()
-            
-            # If page has sufficient text, use it
-            if len(page_text) >= self.analyzer.min_chars_per_page:
-                if self.include_page_numbers:
-                    text_parts.append(f"--- PAGE {page_num} ---\n{page_text}")
-                else:
-                    text_parts.append(page_text)
-            
-            # Otherwise, use OCR
-            else:
-                try:
-                    # Convert page to image
-                    pix = page.get_pixmap(dpi=self.ocr_dpi)
-                    img_data = pix.tobytes("png")
-                    image = Image.open(io.BytesIO(img_data))
-                    
-                    # OCR the image
-                    ocr_text = pytesseract.image_to_string(image)
-                    
-                    if ocr_text.strip():
-                        if self.include_page_numbers:
-                            text_parts.append(f"--- PAGE {page_num} (OCR) ---\n{ocr_text}")
-                        else:
-                            text_parts.append(ocr_text)
-                    else:
-                        log.warning("page_no_text", file=str(pdf_path), page=page_num)
-                        if self.include_page_numbers:
-                            text_parts.append(f"--- PAGE {page_num} ---\n[No text extracted]")
-                
-                except Exception as e:
-                    log.warning(
-                        "page_ocr_failed",
-                        file=str(pdf_path),
-                        page=page_num,
-                        error=str(e)
-                    )
+        try:
+            text_parts = []
+
+            for page_num, page in enumerate(doc, 1):
+                # Try PyMuPDF first
+                page_text = page.get_text().strip()
+
+                # If page has sufficient text, use it
+                if len(page_text) >= self.analyzer.min_chars_per_page:
                     if self.include_page_numbers:
-                        text_parts.append(f"--- PAGE {page_num} ---\n[OCR failed]")
-        
-        doc.close()
-        
-        return "\n\n".join(text_parts)
+                        text_parts.append(f"--- PAGE {page_num} ---\n{page_text}")
+                    else:
+                        text_parts.append(page_text)
+
+                # Otherwise, use OCR
+                else:
+                    try:
+                        # Convert page to image
+                        pix = page.get_pixmap(dpi=self.ocr_dpi)
+                        img_data = pix.tobytes("png")
+                        image = Image.open(io.BytesIO(img_data))
+
+                        # OCR the image
+                        ocr_text = pytesseract.image_to_string(image)
+
+                        if ocr_text.strip():
+                            if self.include_page_numbers:
+                                text_parts.append(f"--- PAGE {page_num} (OCR) ---\n{ocr_text}")
+                            else:
+                                text_parts.append(ocr_text)
+                        else:
+                            log.warning("page_no_text", file=str(pdf_path), page=page_num)
+                            if self.include_page_numbers:
+                                text_parts.append(f"--- PAGE {page_num} ---\n[No text extracted]")
+
+                    except Exception as e:
+                        log.warning(
+                            "page_ocr_failed",
+                            file=str(pdf_path),
+                            page=page_num,
+                            error=str(e)
+                        )
+                        if self.include_page_numbers:
+                            text_parts.append(f"--- PAGE {page_num} ---\n[OCR failed]")
+
+            return "\n\n".join(text_parts)
+        finally:
+            doc.close()
     
     def _check_ocr_available(self) -> bool:
         """Check if Tesseract OCR is available."""
