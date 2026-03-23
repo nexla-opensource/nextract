@@ -38,22 +38,13 @@ jobs:
           echo "Error: tag '${TAG_NAME}' does not look like a version (e.g. v0.1.1 or 0.1.1)" >&2
           exit 1
         fi
-        export VERSION
-        python - << 'PY'
-import os, re, sys, pathlib
-version = os.environ.get('VERSION')
-if not version:
-    print('VERSION env var not set', file=sys.stderr)
-    sys.exit(1)
-p = pathlib.Path('pyproject.toml')
-text = p.read_text()
-new_text, n = re.subn(r'(?m)^(version\s*=\s*)"[^"]*"', f'\\1"{version}"', text, count=1)
-if n == 0:
-    print('No version field found to update in pyproject.toml', file=sys.stderr)
-    sys.exit(1)
-p.write_text(new_text)
-print(f'pyproject.toml version updated to {version}')
-PY
+        if ! grep -q '^version\s*=' pyproject.toml; then
+          echo "No version field found to update in pyproject.toml" >&2
+          exit 1
+        fi
+        sed -i "s/^version\s*=\s*\"[^\"]*\"/version = \"${VERSION}\"/" pyproject.toml
+        echo "pyproject.toml version updated to ${VERSION}"
+        grep '^version' pyproject.toml
 
     - name: Build package
       run: |
