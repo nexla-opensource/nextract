@@ -34,6 +34,14 @@ _PDF_EXTS = {".pdf"}
 
 _ZIP_EXTS = {".zip"}
 
+_AUDIO_EXTS = {
+    ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma",
+}
+
+_VIDEO_EXTS = {
+    ".mp4", ".webm", ".mov", ".avi", ".mkv", ".wmv",
+}
+
 _UNSUPPORTED_BUT_ACCEPTABLE_AS_BINARY = {
     # Office documents that we convert to PDF before sending to LLMs
     ".doc", ".docx", ".ppt", ".pptx",
@@ -57,6 +65,12 @@ def is_pdf(path: Path) -> bool:
 
 def is_zip(path: Path) -> bool:
     return path.suffix.lower() in _ZIP_EXTS
+
+def is_audio(path: Path) -> bool:
+    return path.suffix.lower() in _AUDIO_EXTS
+
+def is_video(path: Path) -> bool:
+    return path.suffix.lower() in _VIDEO_EXTS
 
 def is_office_binary(path: Path) -> bool:
     return path.suffix.lower() in _UNSUPPORTED_BUT_ACCEPTABLE_AS_BINARY
