@@ -18,7 +18,7 @@ NON_OBJECT_OUTPUT_KEY = "result"
 def is_pydantic_model(obj: Any) -> bool:
     try:
         return issubclass(obj, BaseModel)  # type: ignore[arg-type]
-    except Exception:
+    except TypeError:
         return False
 
 
@@ -136,7 +136,7 @@ def augment_schema_with_extra(schema: JsonSchema, include_extra: bool) -> JsonSc
         "title": schema.get("title", "Extraction"),
         "description": schema.get("description", ""),
     }
-    new_schema["properties"] = dict(base_props)
+    new_schema["properties"] = copy.deepcopy(base_props)
     if "$schema" in schema:
         new_schema["$schema"] = schema["$schema"]
     if "$id" in schema:

@@ -25,19 +25,28 @@ SCHEMAS_DIR = FIXTURES_DIR / "schemas"
 PROVIDER_CREDENTIALS: Dict[str, list[str]] = {
     "openai": ["OPENAI_API_KEY"],
     "anthropic": ["ANTHROPIC_API_KEY"],
-    "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+    "google": ["GOOGLE_API_KEY"],
     "azure": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"],
     "aws": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
-    "cohere": ["COHERE_API_KEY"],
+    "cohere": ["CO_API_KEY"],
     "local": [],
 }
 
+# Providers that require ALL listed env vars (vs any one of them)
+PROVIDER_CREDENTIALS_ALL: set[str] = {"azure", "aws"}
+
 
 def has_provider_credentials(provider: str) -> bool:
-    """Check if required credentials for a provider are available."""
+    """Check if required credentials for a provider are available.
+
+    For providers in PROVIDER_CREDENTIALS_ALL, ALL env vars must be set.
+    For others, ANY one env var is sufficient.
+    """
     required = PROVIDER_CREDENTIALS.get(provider, [])
     if not required:
         return True
+    if provider in PROVIDER_CREDENTIALS_ALL:
+        return all(os.getenv(key) for key in required)
     return any(os.getenv(key) for key in required)
 
 
@@ -166,9 +175,25 @@ def sample_text_content() -> str:
 
 @pytest.fixture
 def sample_pdf_path(tmp_path: Path, sample_text_content: str) -> Path:
-    """Create a simple text file simulating a document for testing."""
-    doc_path = tmp_path / "sample_invoice.txt"
-    doc_path.write_text(sample_text_content)
+    """Create a simple PDF file simulating a document for testing."""
+    doc_path = tmp_path / "sample_invoice.pdf"
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), sample_text_content)
+        doc.save(str(doc_path))
+        doc.close()
+    except ImportError:
+        # Fallback: create a minimal valid PDF
+        pdf_bytes = (
+            b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+            b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n"
+            b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n"
+            b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF\n"
+        )
+        doc_path.write_bytes(pdf_bytes)
     return doc_path
 
 

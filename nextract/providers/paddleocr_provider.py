@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import structlog
@@ -16,14 +17,26 @@ class PaddleOCRProvider(BaseProvider):
     """OCR provider backed by PaddleOCR."""
 
     def __init__(self) -> None:
+        self.name: str = "paddleocr"
         self.config: ProviderConfig | None = None
+        self._ocr_cache: dict[str, Any] = {}
+        self._cache_lock = threading.Lock()
 
     def initialize(self, config: ProviderConfig) -> None:
         self.config = config
+        self.name = config.name
+
+    def _get_ocr(self, language: str) -> Any:
+        from paddleocr import PaddleOCR
+
+        with self._cache_lock:
+            if language not in self._ocr_cache:
+                self._ocr_cache[language] = PaddleOCR(lang=language, show_log=False)
+            return self._ocr_cache[language]
 
     def generate(self, request: ProviderRequest) -> ProviderResponse:
         try:
-            from paddleocr import PaddleOCR
+            from paddleocr import PaddleOCR  # noqa: F401
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise ImportError(
                 "paddleocr required for PaddleOCR. Install with: pip install paddleocr"
@@ -43,7 +56,7 @@ class PaddleOCRProvider(BaseProvider):
         if not language:
             language = "en"
 
-        ocr = PaddleOCR(lang=language, show_log=False)
+        ocr = self._get_ocr(language)
         images = decode_images(request.images, ocr_dpi=ocr_dpi)
         if not images:
             log.warning("paddleocr_no_images")
@@ -56,6 +69,8 @@ class PaddleOCRProvider(BaseProvider):
                 continue
             lines = []
             for page in result:
+                if page is None:
+                    continue
                 for line in page:
                     if len(line) >= 2:
                         lines.append(line[1][0])

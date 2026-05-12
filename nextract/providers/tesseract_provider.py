@@ -16,10 +16,12 @@ class TesseractProvider(BaseProvider):
     """OCR provider backed by Tesseract."""
 
     def __init__(self) -> None:
+        self.name: str = "tesseract"
         self.config: ProviderConfig | None = None
 
     def initialize(self, config: ProviderConfig) -> None:
         self.config = config
+        self.name = config.name
 
     def generate(self, request: ProviderRequest) -> ProviderResponse:
         try:

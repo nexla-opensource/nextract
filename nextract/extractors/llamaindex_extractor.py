@@ -4,7 +4,7 @@ from typing import Any
 
 import structlog
 
-from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality
+from nextract.core import BaseExtractor, ChunkExtraction, ExtractorConfig, ExtractorResult, Modality
 from nextract.extractors.text_extractor import TextExtractor
 from nextract.registry import register_extractor
 
@@ -13,7 +13,15 @@ log = structlog.get_logger(__name__)
 
 @register_extractor("llamaindex")
 class LlamaIndexExtractor(BaseExtractor):
-    """LlamaIndex extractor with TextExtractor fallback."""
+    """LlamaIndex extractor with TextExtractor fallback.
+
+    .. warning::
+        This extractor is **experimental/alpha**. The current implementation
+        builds an ephemeral in-memory VectorStoreIndex per extraction run
+        and does NOT persist or load from ``index_path``. The configured
+        provider, schema, retriever_mode, and examples are also not fully
+        wired. For production use, prefer the ``text`` or ``vlm`` extractors.
+    """
 
     SUPPORTED_PROVIDERS = ["openai", "anthropic", "local"]
 
@@ -91,7 +99,7 @@ class LlamaIndexExtractor(BaseExtractor):
         if not documents:
             return ExtractorResult(
                 name="llamaindex",
-                provider_name=getattr(provider, "config", None).name if getattr(provider, "config", None) else "unknown",
+                provider_name=provider.get_name(),
                 results=[],
                 metadata={"modality": "text", "num_chunks": len(input_data), "llamaindex": True},
             )
@@ -101,17 +109,16 @@ class LlamaIndexExtractor(BaseExtractor):
         response = query_engine.query(prompt)
         payload: dict[str, Any] = {"response": str(response)}
 
-        result = {
-            "chunk_id": "llamaindex",
-            "response": payload,
-            "metadata": {"llamaindex": True},
-            "usage": None,
-        }
+        result = ChunkExtraction(
+            chunk_id="llamaindex",
+            response=payload,
+            metadata={"llamaindex": True},
+            usage=None,
+        )
 
-        provider_name = getattr(provider, "config", None)
         return ExtractorResult(
             name="llamaindex",
-            provider_name=provider_name.name if provider_name else "unknown",
+            provider_name=provider.get_name(),
             results=[result],
             metadata={"modality": "text", "num_chunks": len(input_data), "llamaindex": True},
         )

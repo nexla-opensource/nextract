@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality
+from nextract.core import BaseExtractor, ChunkExtraction, ExtractorConfig, ExtractorResult, Modality
 from nextract.extractors.text_extractor import TextExtractor
 from nextract.extractors.vlm_extractor import VLMExtractor
-from nextract.registry import ProviderRegistry, register_extractor
+from nextract.registry import register_extractor
 
 
 @register_extractor("hybrid")
 class HybridExtractor(BaseExtractor):
     """Hybrid extractor for multi-modality workflows."""
 
-    SUPPORTED_PROVIDERS = ["openai", "anthropic", "google", "azure", "local"]
+    SUPPORTED_PROVIDERS = ["openai", "anthropic", "google", "azure", "local", "bedrock"]
 
     def __init__(self) -> None:
         self.config: ExtractorConfig | None = None
@@ -34,14 +35,17 @@ class HybridExtractor(BaseExtractor):
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:
-        provider_class = ProviderRegistry.get_instance().get(config.provider.name)
-        if provider_class:
-            provider = provider_class()
-            provider.initialize(config.provider)
-            if not provider.supports_vision():
-                raise ValueError(
-                    f"Provider '{config.provider.name}' does not support vision"
-                )
+        from nextract.core.model_capabilities import get_model_capability
+        has_vision = get_model_capability(
+            model=config.provider.model,
+            capability="vision",
+            default=False,
+            provider=config.provider.name,
+        )
+        if not has_vision:
+            raise ValueError(
+                f"Provider '{config.provider.name}' does not support vision"
+            )
         return True
 
     def run(
@@ -66,7 +70,7 @@ class HybridExtractor(BaseExtractor):
             else:
                 visual_chunks.append(chunk)
 
-        results: list[dict[str, Any]] = []
+        results: list[ChunkExtraction] = []
 
         if visual_chunks:
             vlm_result = self._vlm.run(
@@ -95,10 +99,9 @@ class HybridExtractor(BaseExtractor):
         # Preserve hybrid chunk ordering when both modalities are present.
         results.sort(key=self._result_sort_key)
 
-        provider_name = getattr(provider, "config", None)
         return ExtractorResult(
             name="hybrid",
-            provider_name=provider_name.name if provider_name else "unknown",
+            provider_name=provider.get_name(),
             results=results,
             metadata={
                 "modality": "hybrid",
@@ -114,4 +117,8 @@ class HybridExtractor(BaseExtractor):
         hybrid_order = metadata.get("hybrid_order")
         if isinstance(hybrid_order, int):
             return (0, hybrid_order, str(result.get("chunk_id", "")))
-        return (1, 0, str(result.get("chunk_id", "")))
+        # Extract numeric index from chunk_id (e.g. "chunk_3" -> 3) for stable ordering
+        chunk_id = str(result.get("chunk_id", ""))
+        m = re.search(r"\d+", chunk_id)
+        numeric_idx = int(m.group()) if m else 0
+        return (1, numeric_idx, chunk_id)

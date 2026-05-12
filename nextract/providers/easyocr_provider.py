@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import structlog
@@ -16,14 +17,31 @@ class EasyOCRProvider(BaseProvider):
     """OCR provider backed by EasyOCR."""
 
     def __init__(self) -> None:
+        self.name: str = "easyocr"
         self.config: ProviderConfig | None = None
+        self._reader_cache: dict[str, Any] = {}
+        self._cache_lock = threading.Lock()
 
     def initialize(self, config: ProviderConfig) -> None:
         self.config = config
+        self.name = config.name
+
+    def _get_reader(self, languages: tuple[str, ...]) -> Any:
+        import easyocr
+
+        gpu = False
+        if self.config and self.config.extra_params:
+            gpu = self.config.extra_params.get("gpu", False)
+
+        key = ",".join(languages)
+        with self._cache_lock:
+            if key not in self._reader_cache:
+                self._reader_cache[key] = easyocr.Reader(list(languages), gpu=gpu)
+            return self._reader_cache[key]
 
     def generate(self, request: ProviderRequest) -> ProviderResponse:
         try:
-            import easyocr
+            import easyocr  # noqa: F401
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise ImportError(
                 "easyocr required for EasyOCR. Install with: pip install easyocr"
@@ -43,7 +61,7 @@ class EasyOCRProvider(BaseProvider):
         if not languages:
             languages = ["en"]
 
-        reader = easyocr.Reader(list(languages), gpu=False)
+        reader = self._get_reader(tuple(languages))
         images = decode_images(request.images, ocr_dpi=ocr_dpi)
         if not images:
             log.warning("easyocr_no_images")

@@ -15,8 +15,9 @@ def parse_pricing_json(json_str: str) -> dict[str, ModelPricing]:
         return {}
     try:
         raw = json.loads(json_str)
-    except Exception:
-        # Invalid pricing JSON; ignore gracefully
+    except (json.JSONDecodeError, ValueError) as exc:
+        import structlog
+        structlog.get_logger(__name__).warning("pricing_json_parse_failed", error=str(exc))
         return {}
     out: dict[str, ModelPricing] = {}
     for model, entry in raw.items():
@@ -25,7 +26,9 @@ def parse_pricing_json(json_str: str) -> dict[str, ModelPricing]:
                 input_per_1k=float(entry["input_per_1k"]),
                 output_per_1k=float(entry["output_per_1k"]),
             )
-        except Exception:
+        except (KeyError, ValueError, TypeError) as exc:
+            import structlog
+            structlog.get_logger(__name__).warning("pricing_entry_invalid", model=model, error=str(exc))
             continue
     return out
 
@@ -34,4 +37,18 @@ def estimate_cost_usd(usage: RunUsage, model_name: str, pricing_map: dict[str, M
     if not mp:
         return None
     cost = (usage.input_tokens / 1000.0) * mp.input_per_1k + (usage.output_tokens / 1000.0) * mp.output_per_1k
+    return float(cost)
+
+
+def estimate_cost_usd_sync(
+    input_tokens: int,
+    output_tokens: int,
+    model_name: str,
+    pricing_map: dict[str, ModelPricing],
+) -> float | None:
+    """Estimate cost from raw token counts (no RunUsage dependency)."""
+    mp = pricing_map.get(model_name)
+    if not mp:
+        return None
+    cost = (input_tokens / 1000.0) * mp.input_per_1k + (output_tokens / 1000.0) * mp.output_per_1k
     return float(cost)

@@ -6,12 +6,12 @@ eliminating code duplication across VLM, Text, and OCR extractors.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import structlog
 
 if TYPE_CHECKING:
-    from nextract.core import ExtractorConfig, ProviderRequest
+    from nextract.core import ExtractorConfig, ProviderRequest, ProviderResponse, BaseProvider
 
 log = structlog.get_logger(__name__)
 
@@ -51,7 +51,7 @@ class FallbackMixin:
         """Get retryable exceptions."""
         return cls.RETRYABLE_EXCEPTIONS
 
-    def _safe_generate(self, provider: Any, request: "ProviderRequest") -> Any:
+    def _safe_generate(self, provider: "BaseProvider", request: "ProviderRequest") -> "ProviderResponse":
         """Generate with fallback provider support.
 
         Args:
@@ -69,8 +69,12 @@ class FallbackMixin:
         except self._get_retryable_exceptions() as exc:
             return self._try_fallback(request, exc)
 
-    def _try_fallback(self, request: "ProviderRequest", exc: Exception) -> Any:
+    def _try_fallback(self, request: "ProviderRequest", exc: Exception) -> "ProviderResponse":
         """Attempt to use fallback provider if configured.
+
+        For Pydantic AI providers, this can use FallbackModel for model-level
+        fallback. For non-Pydantic AI providers, it falls back to constructing
+        a new provider instance.
 
         Args:
             request: The provider request to execute.
@@ -83,8 +87,13 @@ class FallbackMixin:
             The original exception if no fallback is configured or available.
         """
         from nextract.registry import ProviderRegistry
+        from nextract.core.exceptions import ProviderAuthError, ProviderCapabilityError
 
         if not self.config or not self.config.fallback_provider:
+            raise exc
+
+        # Don't attempt fallback for auth/capability errors - those are configuration issues
+        if isinstance(exc, (ProviderAuthError, ProviderCapabilityError)):
             raise exc
 
         fallback_class = ProviderRegistry.get_instance().get(

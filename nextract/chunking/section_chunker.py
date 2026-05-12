@@ -11,7 +11,13 @@ log = structlog.get_logger(__name__)
 
 @register_chunker("section")
 class SectionChunker(BaseChunker):
-    """Section-based chunker using semantic boundaries as a baseline."""
+    """Section-based chunker — currently delegates to SemanticChunker.
+
+    .. note::
+        Section-aware boundary detection is not yet implemented.
+        This chunker is functionally identical to ``semantic``.
+        A future release will add heading/section-break detection.
+    """
 
     def __init__(self) -> None:
         self._fallback = SemanticChunker()
@@ -24,5 +30,4 @@ class SectionChunker(BaseChunker):
         return self._fallback.validate_config(config)
 
     def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[TextChunk]:
-        log.warning("section_chunker_not_implemented", msg="SectionChunker delegates to SemanticChunker; section-aware chunking is not yet implemented")
         return self._fallback.chunk(document, config)

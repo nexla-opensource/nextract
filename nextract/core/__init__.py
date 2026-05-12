@@ -4,13 +4,12 @@ from .base import (
     BaseFormatter,
     BaseProvider,
     BaseValidator,
-    Modality,
-    ProviderRequest,
-    ProviderResponse,
 )
+from .types import Modality, ProviderRequest, ProviderResponse
 from .config import ChunkerConfig, ExtractionPlan, ExtractorConfig, ProviderConfig
 from .artifacts import (
     CharInterval,
+    ChunkExtraction,
     Citation,
     ConfidenceScore,
     DocumentArtifact,
@@ -19,6 +18,7 @@ from .artifacts import (
     ExtractorResult,
     FieldResult,
     ImageChunk,
+    ProviderUsage,
     TextChunk,
     ValidationResult,
 )
@@ -35,6 +35,8 @@ from .model_capabilities import (
     get_model_capability,
     get_model_capabilities,
     register_model_capability,
+    reset_model_capabilities,
+    snapshot_model_capabilities,
 )
 
 __all__ = [
@@ -51,6 +53,7 @@ __all__ = [
     "ExtractorConfig",
     "ProviderConfig",
     "CharInterval",
+    "ChunkExtraction",
     "Citation",
     "ConfidenceScore",
     "DocumentArtifact",
@@ -59,6 +62,7 @@ __all__ = [
     "ExtractorResult",
     "FieldResult",
     "ImageChunk",
+    "ProviderUsage",
     "TextChunk",
     "ValidationResult",
     "ChunkerError",
@@ -71,4 +75,6 @@ __all__ = [
     "get_model_capability",
     "get_model_capabilities",
     "register_model_capability",
+    "reset_model_capabilities",
+    "snapshot_model_capabilities",
 ]

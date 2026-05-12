@@ -34,12 +34,22 @@ class TestAzureProviderUnit:
 
 @pytest.mark.integration
 class TestAWSProviderUnit:
-    """Unit tests for AWS provider."""
+    """Unit tests for AWS provider (deprecated alias for bedrock)."""
 
     def test_provider_registered(self):
-        """AWS provider should be registered."""
+        """AWS provider should be registered as a legacy alias."""
         registry = ProviderRegistry.get_instance()
         assert "aws" in registry.list_providers()
+
+    def test_bedrock_provider_registered(self):
+        """Bedrock provider should be registered."""
+        registry = ProviderRegistry.get_instance()
+        assert "bedrock" in registry.list_providers()
+
+    def test_textract_provider_registered(self):
+        """Textract provider should be registered."""
+        registry = ProviderRegistry.get_instance()
+        assert "textract" in registry.list_providers()
 
     def test_provider_initialization(self):
         """Provider initializes with valid config."""
@@ -51,6 +61,18 @@ class TestAWSProviderUnit:
         provider.initialize(config)
         
         assert provider.config is not None
+
+    def test_bedrock_initialization(self):
+        """Bedrock provider initializes with valid config."""
+        provider_class = ProviderRegistry.get_instance().get("bedrock")
+        assert provider_class is not None
+
+        provider = provider_class()
+        config = ProviderConfig(name="bedrock", model="anthropic.claude-3-sonnet-20240229-v1:0")
+        provider.initialize(config)
+
+        assert provider.config is not None
+        assert provider._resolve_model_id().startswith("bedrock:")
 
 
 @pytest.mark.integration

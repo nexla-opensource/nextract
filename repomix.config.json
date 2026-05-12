@@ -1,0 +1,49 @@
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 5242880
+  },
+  "output": {
+    "filePath": "repomix-output.txt",
+    "style": "plain",
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "headerText": "Nextract - Structured Document Extraction Library"
+  },
+  "include": [
+    "nextract/**",
+    "tests/**",
+    "docs/**",
+    "pyproject.toml",
+    "requirements.txt",
+    "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".git/**",
+      ".venv/**",
+      ".mypy_cache/**",
+      ".pytest_cache/**",
+      ".ruff_cache/**",
+      "dist/**",
+      "nextract.egg-info/**",
+      "path/**",
+      "usage/**",
+      ".claude/**",
+      ".gemini/**",
+      "__pycache__/**",
+      "*.pyc",
+      ".env",
+      ".DS_Store",
+      "repomix-output.txt"
+    ]
+  }
+}

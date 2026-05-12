@@ -11,7 +11,13 @@ log = structlog.get_logger(__name__)
 
 @register_chunker("table_aware")
 class TableAwareChunker(BaseChunker):
-    """Chunker that preserves tables when possible."""
+    """Chunker that preserves tables when possible — currently delegates to SemanticChunker.
+
+    .. note::
+        Table-aware boundary detection is not yet implemented.
+        This chunker is functionally identical to ``semantic``.
+        A future release will add table-boundary-aware chunking.
+    """
 
     def __init__(self) -> None:
         self._fallback = SemanticChunker()
@@ -24,5 +30,4 @@ class TableAwareChunker(BaseChunker):
         return self._fallback.validate_config(config)
 
     def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[TextChunk]:
-        log.warning("table_aware_chunker_not_implemented", msg="TableAwareChunker delegates to SemanticChunker; table-aware chunking is not yet implemented")
         return self._fallback.chunk(document, config)

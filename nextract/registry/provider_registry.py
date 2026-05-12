@@ -1,45 +1,30 @@
 from __future__ import annotations
 
-import threading
-
 from nextract.core.base import BaseProvider
+from nextract.registry.base import Registry
 
 
-class ProviderRegistry:
+class ProviderRegistry(Registry[BaseProvider]):
     """Registry for all provider implementations."""
 
-    _instance: ProviderRegistry | None = None
-    _lock: threading.Lock = threading.Lock()
-
     def __init__(self) -> None:
-        self._providers: dict[str, type[BaseProvider]] = {}
-
-    @classmethod
-    def get_instance(cls) -> "ProviderRegistry":
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
-
-    def register(self, name: str, provider_class: type[BaseProvider]) -> None:
-        if name in self._providers:
-            import warnings
-            warnings.warn(f"Provider '{name}' already registered; overwriting.", stacklevel=3)
-        self._providers[name] = provider_class
-
-    def get(self, name: str) -> type[BaseProvider] | None:
-        return self._providers.get(name)
+        super().__init__(kind="provider")
 
     def list_providers(self) -> list[str]:
-        return list(self._providers.keys())
+        return self.list_items()
 
 
-def register_provider(name: str):
-    """Decorator to register a provider."""
+def register_provider(name: str, *, overwrite: bool = False):
+    """Decorator to register a provider.
+
+    Args:
+        name: Unique name for the provider.
+        overwrite: If True, silently replace any existing registration.
+            Defaults to False — duplicates raise RegistryError.
+    """
 
     def decorator(cls: type[BaseProvider]):
-        ProviderRegistry.get_instance().register(name, cls)
+        ProviderRegistry.get_instance().register(name, cls, overwrite=overwrite)
         return cls
 
     return decorator

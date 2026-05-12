@@ -27,7 +27,8 @@ class SchemaGenerator:
     """Generate JSON Schemas from sample documents and prompts."""
 
     def __init__(self, provider: ProviderConfig) -> None:
-        import nextract.providers  # noqa: F401
+        from nextract.registry.bootstrap import ensure_plugins_loaded
+        ensure_plugins_loaded()
 
         provider_class = ProviderRegistry.get_instance().get(provider.name)
         if not provider_class:

@@ -5,10 +5,10 @@ from typing import Any
 import structlog
 from pydantic_ai import BinaryContent
 
-from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality, ProviderRequest
+from nextract.core import BaseExtractor, ChunkExtraction, ExtractorConfig, ExtractorResult, Modality, ProviderRequest, ProviderUsage
 from nextract.extractors.fallback_mixin import FallbackMixin
 from nextract.prompts import build_examples_block, combine_system_prompt
-from nextract.registry import ProviderRegistry, register_extractor
+from nextract.registry import register_extractor
 
 log = structlog.get_logger(__name__)
 
@@ -23,6 +23,7 @@ class VLMExtractor(FallbackMixin, BaseExtractor):
         "google",
         "azure",
         "local",
+        "bedrock",
     ]
 
     def __init__(self) -> None:
@@ -41,14 +42,17 @@ class VLMExtractor(FallbackMixin, BaseExtractor):
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:
-        provider_class = ProviderRegistry.get_instance().get(config.provider.name)
-        if provider_class:
-            provider = provider_class()
-            provider.initialize(config.provider)
-            if not provider.supports_vision():
-                raise ValueError(
-                    f"Provider '{config.provider.name}' does not support vision"
-                )
+        from nextract.core.model_capabilities import get_model_capability
+        has_vision = get_model_capability(
+            model=config.provider.model,
+            capability="vision",
+            default=False,
+            provider=config.provider.name,
+        )
+        if not has_vision:
+            raise ValueError(
+                f"Provider '{config.provider.name}' does not support vision"
+            )
         return True
 
     def run(
@@ -66,7 +70,7 @@ class VLMExtractor(FallbackMixin, BaseExtractor):
 
         examples_block = build_examples_block(examples)
         system_prompt = combine_system_prompt(prompt, include_extra, examples_block)
-        results: list[dict[str, Any]] = []
+        results: list[ChunkExtraction] = []
 
         for idx, chunk in enumerate(input_data):
             binary_parts: list[BinaryContent] = []
@@ -95,21 +99,23 @@ class VLMExtractor(FallbackMixin, BaseExtractor):
                         },
                     )
                     response = self._safe_generate(provider, request)
-                    payload = response.structured_output or response.text
+                    payload = response.structured_output if response.structured_output is not None else response.text
+                    usage = ProviderUsage.from_dict(response.usage) if isinstance(response.usage, dict) else response.usage
                     results.append(
-                        {
-                            "chunk_id": getattr(chunk, "id", f"chunk_{idx}"),
-                            "response": payload,
-                            "metadata": metadata,
-                            "usage": response.usage,
-                        }
+                        ChunkExtraction(
+                            chunk_id=getattr(chunk, "id", f"chunk_{idx}"),
+                            response=payload,
+                            metadata=metadata,
+                            usage=usage,
+                        )
                     )
                     continue
                 metadata = getattr(chunk, "metadata", {})
             elif hasattr(chunk, "images"):
                 for image in chunk.images:
+                    image_bytes, media_type = self._normalize_image(image)
                     binary_parts.append(
-                        BinaryContent(data=image, media_type="image/png")
+                        BinaryContent(data=image_bytes, media_type=media_type)
                     )
                 metadata = getattr(chunk, "metadata", {})
 
@@ -129,21 +135,41 @@ class VLMExtractor(FallbackMixin, BaseExtractor):
             )
 
             response = self._safe_generate(provider, request)
-            payload = response.structured_output or response.text
+            payload = response.structured_output if response.structured_output is not None else response.text
+            usage = ProviderUsage.from_dict(response.usage) if isinstance(response.usage, dict) else response.usage
 
             results.append(
-                {
-                    "chunk_id": getattr(chunk, "id", f"chunk_{idx}"),
-                    "response": payload,
-                    "metadata": metadata,
-                    "usage": response.usage,
-                }
+                ChunkExtraction(
+                    chunk_id=getattr(chunk, "id", f"chunk_{idx}"),
+                    response=payload,
+                    metadata=metadata,
+                    usage=usage,
+                )
             )
 
-        provider_name = getattr(provider, "config", None)
         return ExtractorResult(
             name="vlm",
-            provider_name=provider_name.name if provider_name else "unknown",
+            provider_name=provider.get_name(),
             results=results,
             metadata={"modality": "visual", "num_chunks": len(input_data)},
         )
+
+    @staticmethod
+    def _normalize_image(image: Any) -> tuple[bytes, str]:
+        """Normalize image to bytes and infer media type.
+
+        Handles bytes, bytearray, and PIL.Image.Image objects.
+        Non-bytes images (e.g., PIL images) are converted to PNG bytes.
+        """
+        from nextract.providers.ocr_utils import encode_image_to_bytes, infer_image_media_type
+
+        data = encode_image_to_bytes(image)
+        if data is None:
+            raise TypeError(
+                f"Unsupported image type for VLM: {type(image).__name__}. "
+                f"Expected bytes, bytearray, or PIL.Image.Image."
+            )
+        if isinstance(image, (bytes, bytearray)):
+            return data, infer_image_media_type(data)
+        # PIL images are converted to PNG
+        return data, "image/png"

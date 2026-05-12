@@ -1,44 +1,18 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-
-class Modality(Enum):
-    """Modality determines available features."""
-
-    VISUAL = "visual"
-    TEXT = "text"
-    HYBRID = "hybrid"
-
-
-@dataclass
-class ProviderRequest:
-    """Normalized provider request across text, vision, and structured outputs."""
-
-    messages: list[dict[str, Any]]
-    images: list[str] | None = None
-    schema: dict[str, Any] | None = None
-    options: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ProviderResponse:
-    """Normalized provider response."""
-
-    text: str
-    structured_output: dict[str, Any] | None = None
-    usage: dict[str, Any] | None = None
-    raw: Any = None
+from .types import Modality, ProviderRequest, ProviderResponse
 
 
 class BaseProvider(ABC):
     """Base interface for all LLM/API providers."""
 
+    name: str  # Set during initialize() from config
+
     @abstractmethod
-    def initialize(self, config: "ProviderConfig") -> None:
+    def initialize(self, config: ProviderConfig) -> None:
         """Initialize provider with configuration."""
         ...
 
@@ -62,12 +36,16 @@ class BaseProvider(ABC):
         """Return provider capabilities."""
         ...
 
+    def get_name(self) -> str:
+        """Return the provider name."""
+        return getattr(self, "name", "unknown")
+
 
 class BaseExtractor(ABC):
     """Base interface for all extractors."""
 
     @abstractmethod
-    def initialize(self, config: "ExtractorConfig") -> None:
+    def initialize(self, config: ExtractorConfig) -> None:
         """Initialize extractor with configuration."""
         ...
 
@@ -77,7 +55,7 @@ class BaseExtractor(ABC):
         input_data: Any,
         provider: BaseProvider,
         **kwargs: Any,
-    ) -> "ExtractorResult":
+    ) -> ExtractorResult:
         """Run extraction using the given provider."""
         ...
 
@@ -94,7 +72,7 @@ class BaseExtractor(ABC):
         ...
 
     @abstractmethod
-    def validate_config(self, config: "ExtractorConfig") -> bool:
+    def validate_config(self, config: ExtractorConfig) -> bool:
         """Validate extractor configuration."""
         ...
 
@@ -108,13 +86,17 @@ class BaseChunker(ABC):
         """Return modalities where this chunker is applicable."""
         ...
 
+    def initialize(self, config: ChunkerConfig) -> None:
+        """Initialize chunker with configuration. Override for resource preloading."""
+        ...
+
     @abstractmethod
-    def chunk(self, document: "DocumentArtifact", config: "ChunkerConfig") -> list["DocumentChunk"]:
+    def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[DocumentChunk]:
         """Chunk document according to the chunker."""
         ...
 
     @abstractmethod
-    def validate_config(self, config: "ChunkerConfig") -> bool:
+    def validate_config(self, config: ChunkerConfig) -> bool:
         """Validate chunker configuration."""
         ...
 
@@ -123,7 +105,7 @@ class BaseValidator(ABC):
     """Base interface for validators."""
 
     @abstractmethod
-    def validate(self, data: dict[str, Any], schema: dict[str, Any], **kwargs: Any) -> "ValidationResult":
+    def validate(self, data: Any, schema: dict[str, Any], **kwargs: Any) -> ValidationResult:
         """Validate extracted data."""
         ...
 
@@ -137,8 +119,6 @@ class BaseFormatter(ABC):
         ...
 
 
-from .artifacts import DocumentArtifact, DocumentChunk, ExtractorResult, ValidationResult  # noqa: E402
-from .config import ProviderConfig, ExtractorConfig, ChunkerConfig  # noqa: E402
-
 if TYPE_CHECKING:
-    from .artifacts import ExtractionResult
+    from .artifacts import DocumentArtifact, DocumentChunk, ExtractionResult, ExtractorResult, ValidationResult
+    from .config import ChunkerConfig, ExtractorConfig, ProviderConfig

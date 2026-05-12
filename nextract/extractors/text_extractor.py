@@ -4,7 +4,7 @@ from typing import Any
 
 import structlog
 
-from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality, ProviderRequest, TextChunk
+from nextract.core import BaseExtractor, ChunkExtraction, ExtractorConfig, ExtractorResult, Modality, ProviderRequest, ProviderUsage, TextChunk
 from nextract.extractors.fallback_mixin import FallbackMixin
 from nextract.prompts import build_examples_block, combine_system_prompt
 from nextract.registry import register_extractor
@@ -23,6 +23,7 @@ class TextExtractor(FallbackMixin, BaseExtractor):
         "azure",
         "local",
         "cohere",
+        "bedrock",
     ]
 
     def __init__(self) -> None:
@@ -58,7 +59,7 @@ class TextExtractor(FallbackMixin, BaseExtractor):
 
         examples_block = build_examples_block(examples)
         system_prompt = combine_system_prompt(prompt, include_extra, examples_block)
-        results: list[dict[str, Any]] = []
+        results: list[ChunkExtraction] = []
 
         for idx, chunk in enumerate(input_data):
             messages = [
@@ -81,21 +82,22 @@ class TextExtractor(FallbackMixin, BaseExtractor):
             )
 
             response = self._safe_generate(provider, request)
-            payload = response.structured_output or response.text
+            payload = response.structured_output if response.structured_output is not None else response.text
+
+            usage = ProviderUsage.from_dict(response.usage) if isinstance(response.usage, dict) else response.usage
 
             results.append(
-                {
-                    "chunk_id": chunk.id if hasattr(chunk, "id") else f"chunk_{idx}",
-                    "response": payload,
-                    "metadata": chunk.metadata,
-                    "usage": response.usage,
-                }
+                ChunkExtraction(
+                    chunk_id=chunk.id,
+                    response=payload,
+                    metadata=chunk.metadata,
+                    usage=usage,
+                )
             )
 
-        provider_name = getattr(provider, "config", None)
         return ExtractorResult(
             name="text",
-            provider_name=provider_name.name if provider_name else "unknown",
+            provider_name=provider.get_name(),
             results=results,
             metadata={"modality": "text", "num_chunks": len(input_data)},
         )

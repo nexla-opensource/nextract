@@ -56,61 +56,19 @@ def _which(*candidates: str) -> str | None:
     return None
 
 
-def _convert_office_to_pdf(path: Path) -> Path | None:
+def _convert_office_to_pdf(path: Path, timeout: int = 120) -> Path | None:
     """Convert .doc/.docx/.ppt/.pptx to PDF using available CLI tools.
 
-    Tries LibreOffice/soffice first, then unoconv. Writes output to a temp dir.
-    Returns the PDF path on success, or None on failure.
+    Delegates to the public converter in ingest.converters.office.
 
     NOTE: The returned path resides in a temp directory (its parent). Callers are
     responsible for cleaning up via ``shutil.rmtree(pdf_path.parent)`` after consuming
     the file.
     """
-    # Prepare temp output directory per file
-    out_dir = Path(tempfile.mkdtemp(prefix=f"nextract-officepdf-{path.stem}-", dir=str(TMP_ROOT)))
-    target_pdf = out_dir / f"{path.stem}.pdf"
+    from nextract.ingest.converters.office import convert_office_to_pdf
 
-    soffice = _which("soffice", "libreoffice")
-    if soffice:
-        try:
-            # --headless convert avoids loading file into memory in Python
-            cmd = [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), str(path)]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-            if target_pdf.exists():
-                return target_pdf
-            else:
-                log.debug(
-                    "office_pdf_conversion_no_output",
-                    tool="soffice",
-                    returncode=res.returncode,
-                    stdout=res.stdout.decode(errors="ignore"),
-                    stderr=res.stderr.decode(errors="ignore"),
-                    file=str(path),
-                )
-        except Exception as e:  # noqa: BLE001
-            log.debug("office_pdf_conversion_exception", tool="soffice", error=str(e), file=str(path))
-
-    unoconv = _which("unoconv")
-    if unoconv:
-        try:
-            cmd = [unoconv, "-f", "pdf", "-o", str(out_dir), str(path)]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-            if target_pdf.exists():
-                return target_pdf
-            else:
-                log.debug(
-                    "office_pdf_conversion_no_output",
-                    tool="unoconv",
-                    returncode=res.returncode,
-                    stdout=res.stdout.decode(errors="ignore"),
-                    stderr=res.stderr.decode(errors="ignore"),
-                    file=str(path),
-                )
-        except Exception as e:  # noqa: BLE001
-            log.debug("office_pdf_conversion_exception", tool="unoconv", error=str(e), file=str(path))
-
-    # Failed all methods
-    return None
+    pdf_path, _temp_dir = convert_office_to_pdf(path, timeout=timeout)
+    return pdf_path
 
 
 def _xlsx_to_text(path: Path) -> str:
@@ -423,9 +381,29 @@ def _safe_extract_zip(zip_path: Path, dest_dir: Path) -> list[Path]:
                 f"ZIP contains {len(members)} members, exceeding limit of {_MAX_ZIP_MEMBERS}"
             )
         total_bytes = 0
+        resolved_dest = dest_dir.resolve()
         for member in members:
-            # prevent directory traversal
             member_path = Path(member.filename)
+
+            # Prevent directory traversal: reject absolute paths and ".." components
+            if member_path.is_absolute():
+                raise ValueError(
+                    f"ZIP member {member.filename!r} has an absolute path, which is not allowed"
+                )
+            if ".." in member_path.parts:
+                raise ValueError(
+                    f"ZIP member {member.filename!r} contains '..' path components, "
+                    f"which is not allowed"
+                )
+
+            # Double-check containment after resolution
+            target = resolved_dest / member_path
+            resolved_target = target.resolve()
+            if not resolved_target.is_relative_to(resolved_dest):
+                raise ValueError(
+                    f"ZIP member {member.filename!r} resolves outside the target directory"
+                )
+
             if member.file_size > _MAX_ZIP_MEMBER_BYTES:
                 raise ValueError(
                     f"ZIP member {member.filename!r} is {member.file_size} bytes, "
@@ -436,7 +414,8 @@ def _safe_extract_zip(zip_path: Path, dest_dir: Path) -> list[Path]:
                 raise ValueError(
                     f"ZIP total uncompressed size exceeds limit of {_MAX_ZIP_TOTAL_BYTES}"
                 )
-            target = dest_dir / member_path.name
+            # Preserve directory structure to avoid overwriting same-name files
+            target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member, "r") as src, open(target, "wb") as dst:
                 shutil.copyfileobj(src, dst, length=65536)
             extracted.append(target)

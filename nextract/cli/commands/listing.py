@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import typer
 
-import nextract.chunking  # noqa: F401
-import nextract.extractors  # noqa: F401
-import nextract.providers  # noqa: F401
 from nextract.registry import ChunkerRegistry, ExtractorRegistry, ProviderRegistry
+from nextract.registry.bootstrap import ensure_plugins_loaded
+
+ensure_plugins_loaded()
 
 app = typer.Typer(add_completion=False)
 

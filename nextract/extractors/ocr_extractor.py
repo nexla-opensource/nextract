@@ -5,9 +5,10 @@ from typing import Any
 
 import structlog
 
-from nextract.core import BaseExtractor, ExtractorConfig, ExtractorResult, Modality, ProviderRequest
+from nextract.core import BaseExtractor, ChunkExtraction, ExtractorConfig, ExtractorResult, Modality, ProviderRequest, ProviderUsage
+from nextract.core.exceptions import ExtractorError
 from nextract.extractors.fallback_mixin import OCRFallbackMixin
-from nextract.registry import ProviderRegistry, register_extractor
+from nextract.registry import register_extractor
 
 log = structlog.get_logger(__name__)
 
@@ -34,14 +35,35 @@ class OCRExtractor(OCRFallbackMixin, BaseExtractor):
         return cls.SUPPORTED_PROVIDERS
 
     def validate_config(self, config: ExtractorConfig) -> bool:
-        provider_class = ProviderRegistry.get_instance().get(config.provider.name)
-        if provider_class:
-            provider = provider_class()
-            provider.initialize(config.provider)
-            if not provider.supports_vision():
-                raise ValueError(
-                    f"Provider '{config.provider.name}' does not support vision"
-                )
+        # OCR providers bypass the LLM model capability table.
+        # Instead, check the provider class directly.
+        from nextract.registry import ProviderRegistry
+
+        provider_name = config.provider.name
+
+        # Check if the provider is a known OCR provider
+        if provider_name in self.SUPPORTED_PROVIDERS:
+            provider_class = ProviderRegistry.get_instance().get(provider_name)
+            if provider_class is not None:
+                provider_instance = provider_class()
+                if provider_instance.supports_vision():
+                    return True
+            raise ValueError(
+                f"OCR provider '{provider_name}' does not support vision"
+            )
+
+        # For non-OCR providers, fall back to model capability table
+        from nextract.core.model_capabilities import get_model_capability
+        has_vision = get_model_capability(
+            model=config.provider.model,
+            capability="vision",
+            default=False,
+            provider=config.provider.name,
+        )
+        if not has_vision:
+            raise ValueError(
+                f"Provider '{config.provider.name}' does not support vision"
+            )
         return True
 
     def run(
@@ -58,7 +80,7 @@ class OCRExtractor(OCRFallbackMixin, BaseExtractor):
         ocr_dpi = int(self.config.extractor_params.get("ocr_dpi", 300))
         language = self.config.extractor_params.get("language")
 
-        results: list[dict[str, Any]] = []
+        results: list[ChunkExtraction] = []
 
         for idx, chunk in enumerate(input_data):
             images_b64 = self._chunk_to_images_b64(chunk)
@@ -86,20 +108,22 @@ class OCRExtractor(OCRFallbackMixin, BaseExtractor):
                     text = chunk.content
 
             payload = response.structured_output if response and response.structured_output else {"text": text}
+            usage = None
+            if response and response.usage:
+                usage = ProviderUsage.from_dict(response.usage) if isinstance(response.usage, dict) else response.usage
 
             results.append(
-                {
-                    "chunk_id": getattr(chunk, "id", f"chunk_{idx}"),
-                    "response": payload,
-                    "metadata": metadata,
-                    "usage": response.usage if response else None,
-                }
+                ChunkExtraction(
+                    chunk_id=getattr(chunk, "id", f"chunk_{idx}"),
+                    response=payload,
+                    metadata=metadata,
+                    usage=usage,
+                )
             )
 
-        provider_name = getattr(provider, "config", None)
         return ExtractorResult(
             name="ocr",
-            provider_name=provider_name.name if provider_name else "unknown",
+            provider_name=provider.get_name(),
             results=results,
             metadata={"modality": "visual", "num_chunks": len(input_data)},
         )
@@ -136,4 +160,7 @@ class OCRExtractor(OCRFallbackMixin, BaseExtractor):
             image.save(buffer, format="PNG")
             return base64.b64encode(buffer.getvalue()).decode("ascii")
 
-        return ""
+        raise ExtractorError(
+            f"Unsupported image type for OCR encoding: {type(image).__name__}. "
+            f"Expected bytes, bytearray, or PIL.Image.Image."
+        )

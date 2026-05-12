@@ -8,8 +8,13 @@ from nextract.core import BaseProvider, ProviderConfig, ProviderRequest, Provide
 class CustomProviderTemplate(BaseProvider):
     """Template for custom provider implementations."""
 
+    def __init__(self) -> None:
+        self.name: str = "custom"
+        self.config: ProviderConfig | None = None
+
     def initialize(self, config: ProviderConfig) -> None:
         self.config = config
+        self.name = config.name
 
     def generate(self, request: ProviderRequest) -> ProviderResponse:
         raise NotImplementedError

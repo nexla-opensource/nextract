@@ -12,10 +12,12 @@ PROVIDER_DEFAULT_MODELS = {
     "openai": "gpt-4o",
     "anthropic": "claude-sonnet-4-20250514",
     "google": "gemini-2.0-flash",
+    "bedrock": "anthropic.claude-3-5-sonnet-20241022-v2:0",
     "aws": "anthropic.claude-3-5-sonnet-20241022-v2:0",
     "azure": "gpt-4o",
     "local": "llama3",
     "cohere": "command-r-plus",
+    "textract": "default",
 }
 
 DEFAULT_MAX_CONCURRENCY = int(os.getenv("NEXTRACT_MAX_CONCURRENCY", "4"))

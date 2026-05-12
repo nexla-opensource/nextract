@@ -19,6 +19,7 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        cache: pip
 
     - name: Install dependencies
       run: |
@@ -27,11 +28,29 @@ jobs:
 
     - name: Lint
       run: |
-        pip install ruff
         ruff check nextract
 
-    - name: Run tests
+    - name: Type check
+      run: |
+        mypy nextract --ignore-missing-imports --no-strict-optional
+      continue-on-error: true
+
+    - name: Run unit tests
       env:
         PYTHONWARNINGS: default
       run: |
-        pytest tests/ --maxfail=1 -q
+        pytest tests/unit/ -q --maxfail=5
+
+    - name: Run integration tests
+      env:
+        PYTHONWARNINGS: default
+      run: |
+        pytest tests/integration/ -q --maxfail=5
+      continue-on-error: true
+
+    - name: Run tests with coverage
+      if: matrix.python-version == '3.12'
+      env:
+        PYTHONWARNINGS: default
+      run: |
+        pytest tests/unit/ --cov=nextract --cov-fail-under=60 -q

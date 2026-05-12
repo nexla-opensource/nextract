@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+import warnings as _warnings_mod
+from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from jsonschema import Draft202012Validator, ValidationError
@@ -21,6 +22,7 @@ from .prompts import build_examples_block, combine_system_prompt, build_improvem
 from .files import prepare_parts, flatten_for_agent
 from .pricing import estimate_cost_usd, parse_pricing_json
 from .config import RuntimeConfig
+from .validate.schema_validator import validate_schema_complexity
 import structlog
 
 log = structlog.get_logger(__name__)
@@ -84,11 +86,12 @@ class ExtractionReport:
     files: list[str]
     usage: dict[str, Any]
     cost_estimate_usd: float | None = None
-    warnings: list[str] = None  # type: ignore[assignment]
+    warnings: list[str] = field(default_factory=list)
 
 def _attach_jsonschema_validator(agent: Agent, schema: JsonSchema, max_validation_rounds: int = 2) -> None:
     """Add an output validator that validates the dict against the user's JSON Schema and asks the model to retry on failure.
     Pydantic AI docs: 'Output validators' + ModelRetry.  """
+    validate_schema_complexity(schema)
     validator = Draft202012Validator(schema)
 
     # We embed simple state on the function object to cap retries
@@ -175,8 +178,18 @@ async def run_extraction_async(
 ) -> tuple[Any, ExtractionReport]:
     """Run a single-file or multi-file extraction asynchronously.
 
+    .. deprecated::
+        Use ``ExtractionPipeline.extract_async()`` instead.
+        This function uses a parallel execution path that may diverge
+        from the pipeline-based extraction.
+
     Returns (data, report). `data` is dict by default, unless `return_pydantic=True` and a Pydantic model type was passed.
     """
+    _warnings_mod.warn(
+        "run_extraction_async is deprecated. Use ExtractionPipeline.extract_async() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     examples_block = build_examples_block(examples)
     sys_prompt = combine_system_prompt(user_prompt, include_extra, examples_block)
     output_type = build_output_type(schema_or_model, include_extra)

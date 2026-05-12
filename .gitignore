@@ -31,6 +31,9 @@ share/python-wheels/
 *.egg-info/
 *.egg
 MANIFEST
+
+# Repomix
+repomix-output.txt
 pip-wheel-metadata/
 
 # PyInstaller

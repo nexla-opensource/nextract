@@ -3,9 +3,10 @@ Shared fixtures for unit tests.
 
 This module provides:
 - Mock schemas (simple, nested, array)
-- Mock chunks and documents
+- Mock chunks and documents using real dataclass types
 - Mock extraction results
 - Common test utilities
+- Registry state isolation via autouse fixture
 """
 
 from __future__ import annotations
@@ -14,6 +15,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 import pytest
+
+from nextract.core import (
+    ChunkExtraction,
+    DocumentArtifact,
+    DocumentChunk,
+    Modality,
+    ProviderUsage,
+    TextChunk,
+)
 
 
 @dataclass
@@ -24,20 +34,6 @@ class MockChunk:
     source_file: str
     metadata: dict
     chunk_type: str = "text"
-
-
-@dataclass
-class MockDocumentArtifact:
-    """Mock DocumentArtifact for testing."""
-    source_path: str
-    mime_type: str
-    content: bytes = b""
-    text: str = ""
-    metadata: dict = None
-
-    def __post_init__(self):
-        if self.metadata is None:
-            self.metadata = {}
 
 
 @pytest.fixture
@@ -129,6 +125,27 @@ def mock_chunks() -> List[MockChunk]:
 
 
 @pytest.fixture
+def real_text_chunk() -> TextChunk:
+    """Real TextChunk using the actual dataclass."""
+    return TextChunk(
+        id="chunk_0",
+        text="This is test content with Invoice Number INV-12345 and total $500.",
+        source_path="test.pdf",
+        metadata={"page": 1},
+    )
+
+
+@pytest.fixture
+def real_document_artifact() -> DocumentArtifact:
+    """Real DocumentArtifact using the actual dataclass."""
+    return DocumentArtifact(
+        source_path="test.pdf",
+        mime_type="application/pdf",
+        metadata={"filename": "test.pdf"},
+    )
+
+
+@pytest.fixture
 def complete_extraction_result() -> Dict[str, Any]:
     """Complete extraction result with all fields populated."""
     return {
@@ -175,3 +192,30 @@ def sample_text_document() -> str:
     
     Payment due within 30 days.
     """
+
+
+# --- Registry state isolation (F4, F27) ---
+
+@pytest.fixture(autouse=True)
+def _isolate_registries():
+    """Snapshot and restore all registries and model capabilities around each test.
+
+    Prevents test mutations from leaking between test cases.
+    """
+    from nextract.registry import ChunkerRegistry, ExtractorRegistry, ProviderRegistry
+    from nextract.core.model_capabilities import snapshot_model_capabilities, reset_model_capabilities
+
+    extractor_snap = ExtractorRegistry.get_instance().snapshot()
+    provider_snap = ProviderRegistry.get_instance().snapshot()
+    chunker_snap = ChunkerRegistry.get_instance().snapshot()
+    model_caps_snap = snapshot_model_capabilities()
+
+    yield
+
+    ExtractorRegistry.get_instance().restore(extractor_snap)
+    ProviderRegistry.get_instance().restore(provider_snap)
+    ChunkerRegistry.get_instance().restore(chunker_snap)
+    reset_model_capabilities()
+
+    from nextract.registry.bootstrap import reset_bootstrap
+    reset_bootstrap()

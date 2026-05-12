@@ -6,12 +6,15 @@ replacing fragile string matching with explicit capability declarations.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
+
+_LOCK = threading.RLock()
 
 # Model capability registry
 # Keys are model name patterns (matched case-insensitively)
 # Values are dicts with capability flags
-MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
+_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     # OpenAI GPT-5.x models (current flagship line)
     "gpt-5.4": {"vision": True, "structured_output": True, "context_window": 1048576},
     "gpt-5.4-mini": {"vision": True, "structured_output": True, "context_window": 1048576},
@@ -96,7 +99,8 @@ MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
 
 # Providers that generally support vision across their models
 # Used as fallback when specific model is not in registry
-VISION_CAPABLE_PROVIDERS = {"anthropic", "google", "openai"}
+# Note: OCR providers are inherently vision-capable
+VISION_CAPABLE_PROVIDERS = {"anthropic", "google", "openai", "tesseract", "easyocr", "paddleocr", "textract", "bedrock", "aws"}
 
 
 def _normalize_model_name(model: str) -> str:
@@ -111,19 +115,22 @@ def _find_matching_capability(model: str) -> dict[str, Any] | None:
     """Find capability entry that matches the model name."""
     normalized = _normalize_model_name(model)
 
-    # Exact match first
-    if normalized in MODEL_CAPABILITIES:
-        return MODEL_CAPABILITIES[normalized]
+    with _LOCK:
+        caps = _MODEL_CAPABILITIES
 
-    # Prefix match
-    for pattern, capabilities in sorted(MODEL_CAPABILITIES.items(), key=lambda x: len(x[0]), reverse=True):
-        if normalized.startswith(pattern):
-            return capabilities
+        # Exact match first
+        if normalized in caps:
+            return caps[normalized]
 
-    # Substring match
-    for pattern, capabilities in sorted(MODEL_CAPABILITIES.items(), key=lambda x: len(x[0]), reverse=True):
-        if pattern in normalized:
-            return capabilities
+        # Prefix match
+        for pattern, capabilities in sorted(caps.items(), key=lambda x: len(x[0]), reverse=True):
+            if normalized.startswith(pattern):
+                return capabilities
+
+        # Substring match
+        for pattern, capabilities in sorted(caps.items(), key=lambda x: len(x[0]), reverse=True):
+            if pattern in normalized:
+                return capabilities
 
     return None
 
@@ -180,4 +187,17 @@ def register_model_capability(
         model: The model name pattern
         capabilities: Dict of capability flags
     """
-    MODEL_CAPABILITIES[model.lower()] = capabilities
+    with _LOCK:
+        _MODEL_CAPABILITIES[model.lower()] = capabilities
+
+
+def reset_model_capabilities() -> None:
+    """Reset model capabilities registry. Primarily for test isolation."""
+    with _LOCK:
+        _MODEL_CAPABILITIES.clear()
+
+
+def snapshot_model_capabilities() -> dict[str, dict[str, Any]]:
+    """Return a copy of current model capabilities for test restore."""
+    with _LOCK:
+        return dict(_MODEL_CAPABILITIES)

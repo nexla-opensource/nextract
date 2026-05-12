@@ -4,20 +4,28 @@ from typing import Any
 
 from nextract.core import ExtractionPlan, Modality, ValidationResult
 from nextract.core.exceptions import PlanError
-from nextract.registry import ChunkerRegistry, ExtractorRegistry, ProviderRegistry
-import nextract.chunking  # noqa: F401
-import nextract.extractors  # noqa: F401
-import nextract.providers  # noqa: F401
+from nextract.core.model_capabilities import get_model_capability
+from nextract.registry import ChunkerRegistry, ExtractorRegistry
+from nextract.registry.bootstrap import ensure_plugins_loaded
+
+ensure_plugins_loaded()
+
+# OCR providers that bypass the LLM model capability table
+_OCR_PROVIDERS = frozenset({"tesseract", "easyocr", "paddleocr", "textract"})
 
 
 class PlanValidator:
-    """Validates extraction plans based on modalities and compatibility."""
+    """Validates extraction plans based on modalities and compatibility.
+
+    Uses static lookups (model capability registry, provider class metadata)
+    instead of instantiating providers, to avoid side effects.
+    """
 
     @staticmethod
     def validate_extraction_plan(plan: ExtractionPlan) -> ValidationResult:
         try:
             plan.extractor.validate()
-        except Exception as exc:  # noqa: BLE001
+        except ValueError as exc:
             return ValidationResult(valid=False, errors=[str(exc)])
 
         extractor_registry = ExtractorRegistry.get_instance()
@@ -62,24 +70,30 @@ class PlanValidator:
                 ],
             )
 
-        provider_registry = ProviderRegistry.get_instance()
-        provider_class = provider_registry.get(plan.extractor.provider.name)
-
-        if provider_class and modality in {Modality.VISUAL, Modality.HYBRID}:
-            provider = provider_class()
-            provider.initialize(plan.extractor.provider)
-            if not provider.supports_vision():
+        # Vision capability check using static lookups (no provider instantiation)
+        provider_name = plan.extractor.provider.name
+        if modality in {Modality.VISUAL, Modality.HYBRID}:
+            if provider_name in _OCR_PROVIDERS:
+                has_vision = True  # OCR providers are vision-capable by design
+            else:
+                has_vision = get_model_capability(
+                    model=plan.extractor.provider.model,
+                    capability="vision",
+                    default=False,
+                    provider=provider_name,
+                )
+            if not has_vision:
                 return ValidationResult(
                     valid=False,
                     errors=[
-                        f"Provider '{plan.extractor.provider.name}' does not "
+                        f"Provider '{provider_name}' does not "
                         f"support vision, but extractor requires {modality.value.upper()} modality"
                     ],
                 )
 
         try:
             plan.chunker.validate(modality)
-        except Exception as exc:  # noqa: BLE001
+        except ValueError as exc:
             return ValidationResult(valid=False, errors=[str(exc)])
 
         return ValidationResult(valid=True, errors=[])
@@ -92,20 +106,40 @@ class PlanValidator:
 
 
 class CapabilityDetector:
-    """Detects and reports available capabilities based on a plan."""
+    """Detects and reports available capabilities based on a plan.
+
+    Uses static lookups to avoid side effects from provider instantiation.
+    """
 
     @staticmethod
     def detect_capabilities(plan: ExtractionPlan) -> dict[str, Any]:
         extractor_class = ExtractorRegistry.get_instance().get(plan.extractor.name)
-        provider_class = ProviderRegistry.get_instance().get(plan.extractor.provider.name)
+        provider_name = plan.extractor.provider.name
 
         modality = extractor_class.get_modality() if extractor_class else Modality.TEXT
 
-        provider_capabilities: dict[str, Any] = {}
-        if provider_class:
-            provider = provider_class()
-            provider.initialize(plan.extractor.provider)
-            provider_capabilities = provider.get_capabilities()
+        # Static capability detection without instantiation
+        if provider_name in _OCR_PROVIDERS:
+            provider_capabilities: dict[str, Any] = {
+                "vision": True,
+                "structured_output": False,
+                "ocr": True,
+            }
+        else:
+            provider_capabilities = {
+                "vision": get_model_capability(
+                    model=plan.extractor.provider.model,
+                    capability="vision",
+                    default=False,
+                    provider=provider_name,
+                ),
+                "structured_output": get_model_capability(
+                    model=plan.extractor.provider.model,
+                    capability="structured_output",
+                    default=True,
+                    provider=provider_name,
+                ),
+            }
 
         capabilities = {
             "modality": modality.value,

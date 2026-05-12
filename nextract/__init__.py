@@ -41,17 +41,73 @@ def extract_simple(
     provider: str,
     model: str | None = None,
     prompt: str | None = None,
+    mode: str = "auto",
 ) -> Any:
-    """Simplest extraction helper using a default text pipeline."""
+    """Simplest extraction helper with automatic mode selection.
+
+    Args:
+        document: Path to the document to extract from.
+        schema: JSON Schema for the expected output.
+        provider: Provider name (e.g., "openai", "anthropic", "google").
+        model: Model name (defaults to provider's default).
+        prompt: Optional extraction prompt.
+        mode: Extraction mode - "auto", "text", "visual", "ocr", or "textract".
+            "auto" selects based on document type: visual for images/PDFs,
+            text for text files. "text" forces text-only extraction.
+            "visual" forces VLM extraction. "ocr" forces OCR extraction.
+            "textract" forces AWS Textract extraction.
+    """
     if model is None:
         model = get_default_model_for_provider(provider)
     provider_config = ProviderConfig(name=provider, model=model)
-    extractor_config = ExtractorConfig(name="text", provider=provider_config)
-    chunker_config = ChunkerConfig(name="semantic")
+
+    if mode == "auto":
+        mode = _detect_extraction_mode(document)
+
+    extractor_name, chunker_name = _mode_to_extractor_chunker(mode, provider)
+
+    extractor_config = ExtractorConfig(name=extractor_name, provider=provider_config)
+    chunker_config = ChunkerConfig(name=chunker_name)
     plan = ExtractionPlan(extractor=extractor_config, chunker=chunker_config)
 
     pipeline = ExtractionPipeline(plan)
     return pipeline.extract(document=document, schema=schema, prompt=prompt)
+
+
+def _detect_extraction_mode(document: str) -> str:
+    """Detect the best extraction mode based on document type."""
+    import os
+
+    path = document
+    ext = os.path.splitext(path)[1].lower()
+
+    image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"}
+    visual_extensions = image_extensions | {".pdf"}
+    text_extensions = {".txt", ".csv", ".json", ".xml", ".html", ".md", ".yaml", ".yml"}
+
+    if ext in image_extensions:
+        return "visual"
+    if ext in visual_extensions:
+        return "visual"
+    if ext in text_extensions:
+        return "text"
+
+    # Default to text for unknown extensions
+    return "text"
+
+
+def _mode_to_extractor_chunker(mode: str, provider: str) -> tuple[str, str]:
+    """Map extraction mode to extractor and chunker names."""
+    ocr_providers = {"tesseract", "easyocr", "paddleocr"}
+
+    if mode == "textract":
+        return "textract", "page"
+    if mode == "ocr" or provider in ocr_providers:
+        return "ocr", "page"
+    if mode == "visual":
+        return "vlm", "page"
+    # mode == "text" or default
+    return "text", "semantic"
 
 
 def extract(
