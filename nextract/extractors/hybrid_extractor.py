@@ -65,7 +65,14 @@ class HybridExtractor(BaseExtractor):
         text_chunks = []
 
         for chunk in input_data:
-            if hasattr(chunk, "text") or getattr(chunk, "modality", None) == Modality.TEXT:
+            # Prefer hybrid_source metadata from HybridChunker; fall back to types.
+            metadata = getattr(chunk, "metadata", None) or {}
+            hybrid_source = metadata.get("hybrid_source") if hasattr(metadata, "get") else None
+            if hybrid_source == "text":
+                text_chunks.append(chunk)
+            elif hybrid_source == "visual":
+                visual_chunks.append(chunk)
+            elif hasattr(chunk, "text") or getattr(chunk, "modality", None) == Modality.TEXT:
                 text_chunks.append(chunk)
             else:
                 visual_chunks.append(chunk)
@@ -112,13 +119,14 @@ class HybridExtractor(BaseExtractor):
         )
 
     @staticmethod
-    def _result_sort_key(result: dict[str, Any]) -> tuple[int, int, str]:
-        metadata = result.get("metadata") or {}
-        hybrid_order = metadata.get("hybrid_order")
+    def _result_sort_key(result: ChunkExtraction) -> tuple[int, int, str]:
+        """Stable sort key for ChunkExtraction results (not dicts)."""
+        metadata = result.metadata or {}
+        hybrid_order = metadata.get("hybrid_order") if hasattr(metadata, "get") else None
         if isinstance(hybrid_order, int):
-            return (0, hybrid_order, str(result.get("chunk_id", "")))
+            return (0, hybrid_order, str(result.chunk_id))
         # Extract numeric index from chunk_id (e.g. "chunk_3" -> 3) for stable ordering
-        chunk_id = str(result.get("chunk_id", ""))
+        chunk_id = str(result.chunk_id)
         m = re.search(r"\d+", chunk_id)
         numeric_idx = int(m.group()) if m else 0
         return (1, numeric_idx, chunk_id)

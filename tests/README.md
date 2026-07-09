@@ -148,7 +148,7 @@ pytest tests/integration/test_cli/ -v
 ## Known Considerations
 
 1. **Integration tests require credentials**: Without API keys, integration tests will be skipped
-2. **Some tests marked skip**: 12 unit tests are skipped pending implementation
+2. **Some tests marked skip**: multipass error-detail tracking, citation generation, and a few optional-dep skips (e.g. PyMuPDF). `highest_confidence` multipass now fails loudly (`NotImplementedError`) rather than being skipped.
 3. **Async support**: Tests use pytest-asyncio with `asyncio_mode = "auto"`
 
 ---

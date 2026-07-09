@@ -10,17 +10,17 @@ from nextract.config import get_default_model_for_provider
 from nextract.core import ProviderConfig
 from nextract.schema import SchemaGenerator
 
-app = typer.Typer(add_completion=False)
+app = typer.Typer(add_completion=False, help="Suggest a JSON schema from sample documents")
 
 
-@app.command("suggest-schema")
+@app.command("suggest-schema", help="Suggest a JSON schema from sample documents and a prompt")
 def cli_suggest_schema(
-    samples: list[Path] = typer.Argument(..., exists=True, readable=True),
-    prompt: str = typer.Option(..., "--prompt", "-p"),
-    provider: str = typer.Option("openai", "--provider"),
-    model: str | None = typer.Option(None, "--model"),
-    examples: Path | None = typer.Option(None, "--examples"),
-    output: Path | None = typer.Option(None, "--output", "-o"),
+    samples: list[Path] = typer.Argument(..., exists=True, readable=True, help="Sample document paths"),
+    prompt: str = typer.Option(..., "--prompt", "-p", help="What to extract / schema intent"),
+    provider: str = typer.Option("openai", "--provider", help="LLM/API provider name"),
+    model: str | None = typer.Option(None, "--model", help="Model name (provider default if omitted)"),
+    examples: Path | None = typer.Option(None, "--examples", help="Optional JSON file of example extractions"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write schema JSON to file"),
 ) -> None:
     try:
         if model is None:

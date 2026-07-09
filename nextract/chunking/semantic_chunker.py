@@ -15,7 +15,18 @@ log = structlog.get_logger(__name__)
 
 @register_chunker("semantic")
 class SemanticChunker(BaseChunker):
-    """Semantic chunker for text extractors."""
+    """Sentence-aware text chunker.
+
+    Honored config fields:
+    - ``chunk_size`` / ``min_chunk_size``: max character buffer for sentence packing
+      (effective size is ``max(min_chunk_size, chunk_size)``).
+
+    Not applied (no-ops if set on :class:`~nextract.core.config.ChunkerConfig`):
+    - ``chunk_overlap`` — use the ``fixed_size`` chunker if overlap is required
+    - ``preserve_tables`` / ``preserve_sections`` — experimental ``table_aware`` /
+      ``section`` chunkers currently also delegate here; true boundary preservation
+      is not implemented yet
+    """
 
     @classmethod
     def get_applicable_modalities(cls) -> list[Modality]:

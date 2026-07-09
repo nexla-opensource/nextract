@@ -9,21 +9,36 @@ from nextract.registry.bootstrap import ensure_plugins_loaded
 
 ensure_plugins_loaded()
 
-app = typer.Typer(add_completion=False)
+app = typer.Typer(add_completion=False, help="Check provider capabilities and connectivity")
+
+_OCR_PROVIDERS = frozenset({"tesseract", "easyocr", "paddleocr", "textract"})
 
 
-@app.command("check-provider")
+@app.command("check-provider", help="Show capabilities for a provider (optional smoke test)")
 def check_provider(
-    provider: str = typer.Argument(...),
-    model: str = typer.Option(None, "--model", help="Model name (defaults to provider's default)"),
+    provider: str = typer.Argument(..., help="Provider name (e.g. openai, bedrock)"),
+    model: str | None = typer.Option(None, "--model", help="Model name (defaults to provider's default)"),
     smoke: bool = typer.Option(False, "--smoke", help="Perform a minimal test request to verify connectivity"),
 ) -> None:
-    model = model or get_default_model_for_provider(provider)
-
     try:
-        provider_class = ProviderRegistry.get_instance().get(provider)
+        registry = ProviderRegistry.get_instance()
+        provider_class = registry.get(provider)
         if not provider_class:
-            raise typer.BadParameter(f"Unknown provider: {provider}")
+            available = ", ".join(registry.list_providers()) or "(none)"
+            raise typer.BadParameter(
+                f"Unknown provider: {provider}. Available providers: {available}"
+            )
+
+        # Resolve default model after registry lookup so unknown/OCR providers
+        # do not fail before we know the provider exists.
+        if model is None:
+            if provider in _OCR_PROVIDERS:
+                model = "default"
+            else:
+                try:
+                    model = get_default_model_for_provider(provider)
+                except ValueError:
+                    model = "default"
 
         instance = provider_class()
         config = ProviderConfig(name=provider, model=model)
@@ -37,8 +52,19 @@ def check_provider(
         elif hasattr(instance, "_model_id"):
             resolved_model_id = instance._model_id()
 
-        # Get required env vars
-        required_env = instance.get_required_env_vars() if hasattr(instance, "get_required_env_vars") else []
+        # Get required env vars (prefer provider method; fall back to static map)
+        from nextract.credentials import (
+            get_missing_provider_env_vars,
+            get_required_env_vars_for_provider,
+        )
+
+        if hasattr(instance, "get_required_env_vars"):
+            required_env = instance.get_required_env_vars()
+        else:
+            required_env = get_required_env_vars_for_provider(provider)
+        missing_env = get_missing_provider_env_vars(
+            provider, api_key=config.api_key
+        )
 
         compatible = []
         for name in ExtractorRegistry.get_instance().list_extractors():
@@ -56,8 +82,6 @@ def check_provider(
         )
         typer.echo(f"Max tokens: {capabilities.get('max_tokens')}")
         if required_env:
-            import os
-            missing_env = [k for k in required_env if not os.getenv(k)]
             typer.echo(f"Required env vars: {', '.join(required_env)}")
             if missing_env:
                 typer.echo(f"  Missing: {', '.join(missing_env)}", err=True)
@@ -82,6 +106,8 @@ def check_provider(
                 typer.echo(f"Smoke test failed: {exc}", err=True)
                 raise typer.Exit(code=1)
 
+    except typer.Exit:
+        raise
     except typer.BadParameter:
         raise
     except Exception as exc:

@@ -3,6 +3,8 @@ Integration tests for CLI batch command.
 """
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from typer.testing import CliRunner
@@ -10,6 +12,8 @@ from typer.testing import CliRunner
 from tests.integration.conftest import has_provider_credentials
 
 from nextract.cli import app
+from nextract.core import ExtractionResult
+from nextract.pipeline import BatchExtractionResult
 
 runner = CliRunner()
 
@@ -25,6 +29,45 @@ class TestBatchCommandHelp:
         assert result.exit_code == 0
         assert "--schema" in result.output
         assert "--max-workers" in result.output
+        assert "--output" in result.output
+        assert "--chunker" in result.output
+        assert "--pages-per-chunk" in result.output
+
+
+@pytest.mark.integration
+class TestBatchCommandFailureExit:
+    """Tests for batch exit codes when some documents fail."""
+
+    def test_batch_exits_1_on_result_errors(self, tmp_path, schema_file):
+        """If any result has metadata.error, batch should exit 1 and print summary."""
+        doc = tmp_path / "doc.txt"
+        doc.write_text("Invoice INV-001\nTotal: $100")
+
+        failed = ExtractionResult(
+            data=None,
+            metadata={"error": "simulated provider failure"},
+        )
+        ok = ExtractionResult(data={"invoice_number": "INV-001"}, metadata={})
+        mock_result = BatchExtractionResult(
+            results={str(doc): failed, "other.txt": ok},
+            suggestions=[],
+        )
+
+        with patch("nextract.cli.commands.batch.BatchPipeline") as mock_cls:
+            instance = MagicMock()
+            instance.extract_batch.return_value = mock_result
+            mock_cls.return_value = instance
+
+            result = runner.invoke(app, [
+                "batch", str(doc),
+                "--schema", str(schema_file),
+                "--provider", "openai",
+                "--model", "gpt-4o-mini",
+            ])
+
+        assert result.exit_code == 1
+        combined = (result.output or "") + (getattr(result, "stderr", None) or "")
+        assert "1 ok" in combined or "failed" in combined.lower()
 
 
 @pytest.mark.integration

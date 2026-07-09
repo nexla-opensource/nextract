@@ -90,9 +90,21 @@ class CsvFormatter(BaseFormatter):
 
     @staticmethod
     def _safe_csv_cell(value: object) -> object:
-        """Sanitize cell value to prevent CSV formula injection."""
+        """Sanitize cell value to prevent CSV formula injection.
+
+        Prefix formula-injection markers Excel may interpret (=, +, @, -, tab, CR).
+        Legitimate numeric literals (including negatives like -12.5) are left alone.
+        Hybrids such as ``-1+cmd`` are still sanitized.
+        """
+        import re
+
         s = str(value) if value is not None else ""
-        if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        if not s:
+            return s
+        # Full numeric literal: optional leading -, digits, optional fraction/exponent.
+        if re.fullmatch(r"-?\d+(\.\d+)?([eE][+-]?\d+)?", s):
+            return s
+        if s[0] in ("=", "+", "-", "@", "\t", "\r"):
             return "'" + s
         return s
 

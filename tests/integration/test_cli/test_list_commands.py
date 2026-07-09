@@ -22,12 +22,14 @@ class TestListExtractors:
         assert result.exit_code == 0
 
     def test_list_extractors(self):
-        """List extractors should show available extractors."""
+        """List extractors should show available extractors with modality/providers."""
         result = runner.invoke(app, ["list", "extractors"])
-        
+
         assert result.exit_code == 0
         assert "text" in result.output
         assert "vlm" in result.output
+        assert "modality=" in result.output
+        assert "providers=[" in result.output
 
 
 @pytest.mark.integration
@@ -44,10 +46,15 @@ class TestListChunkers:
     def test_list_chunkers_for_text_extractor(self):
         """List chunkers for text extractor."""
         result = runner.invoke(app, ["list", "chunkers", "--extractor", "text"])
-        
+
         assert result.exit_code == 0
         assert "semantic" in result.output
         assert "text" in result.output.lower()
+        # experimental stubs should be marked when listed for text modality
+        if "section" in result.output:
+            assert "experimental/stub" in result.output
+        if "table_aware" in result.output:
+            assert "experimental/stub" in result.output
 
     def test_list_chunkers_for_vlm_extractor(self):
         """List chunkers for VLM extractor."""
@@ -71,7 +78,10 @@ class TestListProviders:
     def test_list_providers(self):
         """List providers should show available providers."""
         result = runner.invoke(app, ["list", "providers"])
-        
+
         assert result.exit_code == 0
         assert "openai" in result.output
         assert "anthropic" in result.output
+        assert "bedrock" in result.output
+        # aws is a deprecated alias for bedrock
+        assert "deprecated alias for bedrock" in result.output

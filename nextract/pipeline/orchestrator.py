@@ -66,10 +66,13 @@ class ExtractionPipeline:
         from nextract.ingest import DocumentValidator
 
         doc_validator = DocumentValidator()
+        doc_warnings: list[str] = []
         for artifact in artifacts:
             validation = doc_validator.validate(artifact)
             if not validation.valid:
                 raise PipelineError("; ".join(validation.errors))
+            if validation.warnings:
+                doc_warnings.extend(validation.warnings)
 
         chunks: list[Any] = []
         for artifact in artifacts:
@@ -77,12 +80,20 @@ class ExtractionPipeline:
 
         if not chunks:
             log.warning("no_chunks_generated", files=documents)
-            return ExtractionResult(data={}, metadata={"chunks": 0})
+            raise PipelineError(
+                "No chunks generated from document(s). Possible causes: "
+                "empty document, wrong modality for document type, "
+                "missing LibreOffice for office docs, missing OCR for scanned PDFs, "
+                "or incompatible chunker configuration.",
+                stage="chunk",
+                document=documents[0] if documents else None,
+            )
 
         prompt_text = prompt or "Extract the requested fields."
         if self.plan.num_passes > 1:
             return self._multi_pass_extract(
                 chunks, schema, prompt_text, examples, include_extra,
+                warnings=doc_warnings,
             )
 
         merged_data, usage, extractor_name, provider_name = self._run_pass(
@@ -95,6 +106,7 @@ class ExtractionPipeline:
 
         return self._build_result(
             merged_data, usage, extractor_name, provider_name, len(chunks), schema,
+            warnings=doc_warnings,
         )
 
     async def extract_async(
@@ -139,6 +151,7 @@ class ExtractionPipeline:
         prompt_text: str,
         examples: list[dict[str, Any]] | None,
         include_extra: bool,
+        warnings: list[str] | None = None,
     ) -> ExtractionResult:
         pass_outputs: list[Any] = []
         pass_usage: list[dict[str, Any]] = []
@@ -172,6 +185,7 @@ class ExtractionPipeline:
         return self._build_result(
             merged_data, usage, extractor_name, provider_name, len(chunks), schema,
             passes=self.plan.num_passes,
+            warnings=warnings,
         )
 
     def _build_result(
@@ -183,25 +197,40 @@ class ExtractionPipeline:
         num_chunks: int,
         schema: dict[str, Any],
         passes: int = 1,
+        warnings: list[str] | None = None,
     ) -> ExtractionResult:
         metadata: dict[str, Any] = {
             "chunks": num_chunks,
             "extractor": extractor_name,
+            "extractor_name": extractor_name,  # alias for docs/examples compatibility
             "provider": provider_name,
+            "provider_name": provider_name,  # alias for docs/examples compatibility
             "usage": usage,
             "passes": passes,
             "include_confidence": self.plan.include_confidence,
             "include_citations": self.plan.include_citations,
         }
 
+        if warnings:
+            metadata["warnings"] = list(warnings)
+
         if self.plan.schema_validation and isinstance(schema, dict):
+            from dataclasses import asdict
+
             from nextract.validate import SchemaValidator
 
             schema_validator = SchemaValidator()
             validation = schema_validator.validate(merged_data, schema)
-            metadata["validation"] = validation
+            # Store a JSON-serializable dict so CLI print_json / json.dumps work.
+            metadata["validation"] = asdict(validation)
             if self.plan.include_confidence:
                 metadata["confidence"] = validation.metadata.get("completeness")
+            if not validation.valid and self.plan.strict_validation:
+                raise PipelineError(
+                    "Schema validation failed under strict_validation: "
+                    + "; ".join(validation.errors),
+                    stage="validate",
+                )
 
         if self.plan.include_citations:
             metadata.setdefault("citations", [])
@@ -305,32 +334,49 @@ class ExtractionPipeline:
             return None
 
     def _build_extractor(self, config: ExtractorConfig):
-        extractor_class = ExtractorRegistry.get_instance().get(config.name)
+        registry = ExtractorRegistry.get_instance()
+        extractor_class = registry.get(config.name)
         if extractor_class is None:
-            raise PipelineError(f"Unknown extractor: {config.name}")
+            available = ", ".join(registry.list_extractors()) or "(none)"
+            raise PipelineError(
+                f"Unknown extractor: {config.name}. Available extractors: {available}"
+            )
         extractor = extractor_class()
         extractor.initialize(config)
         return extractor
 
     def _build_provider(self, config: ProviderConfig):
-        provider_class = ProviderRegistry.get_instance().get(config.name)
+        registry = ProviderRegistry.get_instance()
+        provider_class = registry.get(config.name)
         if provider_class is None:
-            raise PipelineError(f"Unknown provider: {config.name}")
+            available = ", ".join(registry.list_providers()) or "(none)"
+            raise PipelineError(
+                f"Unknown provider: {config.name}. Available providers: {available}"
+            )
         provider = provider_class()
         provider.initialize(config)
         return provider
 
     def _build_chunker(self, name: str):
-        chunker_class = ChunkerRegistry.get_instance().get(name)
+        registry = ChunkerRegistry.get_instance()
+        chunker_class = registry.get(name)
         if chunker_class is None:
-            raise PipelineError(f"Unknown chunker: {name}")
+            available = ", ".join(registry.list_items()) or "(none)"
+            raise PipelineError(
+                f"Unknown chunker: {name}. Available chunkers: {available}"
+            )
         chunker = chunker_class()
         chunker.initialize(self.plan.chunker)
         return chunker
 
 
 class BatchPipeline:
-    """Batch extraction pipeline with shared provider for efficiency."""
+    """Batch extraction pipeline with thread-safe per-document isolation.
+
+    Each worker builds its own :class:`ExtractionPipeline` (provider, extractor,
+    chunker) so concurrent documents never share mutable provider/model state.
+    The plan is validated once up front to fail fast before spawning workers.
+    """
 
     def __init__(
         self,
@@ -358,31 +404,9 @@ class BatchPipeline:
         # Validate plan once up front to fail fast before spawning workers
         PlanValidator.raise_for_invalid(self.plan)
 
-        # Build shared provider and extractor once (F22)
-        provider_class = ProviderRegistry.get_instance().get(self.plan.extractor.provider.name)
-        if provider_class is None:
-            raise PipelineError(f"Unknown provider: {self.plan.extractor.provider.name}")
-        shared_provider = provider_class()
-        shared_provider.initialize(self.plan.extractor.provider)
-
-        extractor_class = ExtractorRegistry.get_instance().get(self.plan.extractor.name)
-        if extractor_class is None:
-            raise PipelineError(f"Unknown extractor: {self.plan.extractor.name}")
-        shared_extractor = extractor_class()
-        shared_extractor.initialize(self.plan.extractor)
-
-        chunker_class = ChunkerRegistry.get_instance().get(self.plan.chunker.name)
-        if chunker_class is None:
-            raise PipelineError(f"Unknown chunker: {self.plan.chunker.name}")
-        shared_chunker = chunker_class()
-        shared_chunker.initialize(self.plan.chunker)
-
         def _run(doc: str) -> tuple[str, ExtractionResult]:
-            pipeline = ExtractionPipeline.__new__(ExtractionPipeline)
-            pipeline.plan = self.plan
-            pipeline.extractor = shared_extractor
-            pipeline.provider = shared_provider
-            pipeline.chunker = shared_chunker
+            # Per-document pipeline: providers/extractors are not thread-safe to share.
+            pipeline = ExtractionPipeline(self.plan)
             return doc, pipeline.extract(
                 document=doc,
                 schema=schema,

@@ -23,17 +23,24 @@ class PlanValidator:
 
     @staticmethod
     def validate_extraction_plan(plan: ExtractionPlan) -> ValidationResult:
+        # plan.validate() enforces num_passes/backoff bounds and applies the
+        # plan retry policy (fills unset provider retries, or forces 1 attempt
+        # when retry_on_failure is False).
         try:
-            plan.extractor.validate()
+            plan.validate()
         except ValueError as exc:
             return ValidationResult(valid=False, errors=[str(exc)])
 
         extractor_registry = ExtractorRegistry.get_instance()
         extractor_class = extractor_registry.get(plan.extractor.name)
         if not extractor_class:
+            available = ", ".join(extractor_registry.list_extractors()) or "(none)"
             return ValidationResult(
                 valid=False,
-                errors=[f"Unknown extractor: {plan.extractor.name}"],
+                errors=[
+                    f"Unknown extractor: {plan.extractor.name}. "
+                    f"Available extractors: {available}"
+                ],
             )
 
         modality = extractor_class.get_modality()
@@ -42,9 +49,13 @@ class PlanValidator:
         chunker_class = chunker_registry.get(plan.chunker.name)
 
         if chunker_class is None:
+            available = ", ".join(chunker_registry.list_items()) or "(none)"
             return ValidationResult(
                 valid=False,
-                errors=[f"Unknown chunker: '{plan.chunker.name}'."],
+                errors=[
+                    f"Unknown chunker: '{plan.chunker.name}'. "
+                    f"Available chunkers: {available}"
+                ],
             )
 
         applicable = chunker_class.get_applicable_modalities()

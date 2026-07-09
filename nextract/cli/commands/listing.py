@@ -7,36 +7,61 @@ from nextract.registry.bootstrap import ensure_plugins_loaded
 
 ensure_plugins_loaded()
 
-app = typer.Typer(add_completion=False)
+app = typer.Typer(
+    add_completion=False,
+    help="List available extractors, providers, and chunkers",
+)
+
+# Chunkers that currently delegate to semantic (stubs / experimental).
+_EXPERIMENTAL_CHUNKERS = frozenset({"section", "table_aware"})
 
 
-@app.command("extractors")
+@app.command("extractors", help="List registered extractors with modality and providers")
 def list_extractors() -> None:
     registry = ExtractorRegistry.get_instance()
     extractors = registry.list_extractors()
     typer.echo("Available extractors:")
     for name in extractors:
-        typer.echo(f"- {name}")
+        extractor_cls = registry.get(name)
+        if extractor_cls is None:
+            typer.echo(f"- {name}")
+            continue
+        modality = extractor_cls.get_modality().value
+        providers = extractor_cls.get_supported_providers()
+        providers_str = ", ".join(providers) if providers else "none"
+        typer.echo(f"- {name}  modality={modality}  providers=[{providers_str}]")
 
 
-@app.command("chunkers")
-def list_chunkers(extractor: str = typer.Option(..., "--extractor")) -> None:
-    extractor_class = ExtractorRegistry.get_instance().get(extractor)
+@app.command("chunkers", help="List chunkers compatible with an extractor")
+def list_chunkers(
+    extractor: str = typer.Option(..., "--extractor", help="Extractor name to filter chunkers by modality"),
+) -> None:
+    registry = ExtractorRegistry.get_instance()
+    extractor_class = registry.get(extractor)
     if not extractor_class:
-        raise typer.BadParameter(f"Unknown extractor: {extractor}")
+        available = ", ".join(registry.list_extractors()) or "(none)"
+        raise typer.BadParameter(
+            f"Unknown extractor: {extractor}. Available extractors: {available}"
+        )
 
     modality = extractor_class.get_modality()
     chunkers = ChunkerRegistry.get_instance().get_chunkers_for_modality(modality)
 
     typer.echo(f"Available chunkers for '{extractor}' extractor ({modality.value} modality):")
     for name in chunkers:
-        typer.echo(f"- {name}")
+        if name in _EXPERIMENTAL_CHUNKERS:
+            typer.echo(f"- {name}  [experimental/stub]")
+        else:
+            typer.echo(f"- {name}")
 
 
-@app.command("providers")
+@app.command("providers", help="List registered providers")
 def list_providers() -> None:
     registry = ProviderRegistry.get_instance()
     providers = registry.list_providers()
     typer.echo("Available providers:")
     for name in providers:
-        typer.echo(f"- {name}")
+        if name == "aws":
+            typer.echo(f"- {name}  (deprecated alias for bedrock)")
+        else:
+            typer.echo(f"- {name}")

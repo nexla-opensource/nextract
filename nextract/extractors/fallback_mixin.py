@@ -51,6 +51,27 @@ class FallbackMixin:
         """Get retryable exceptions."""
         return cls.RETRYABLE_EXCEPTIONS
 
+    def _is_fallback_eligible(self, exc: Exception) -> bool:
+        """Return True if the exception should trigger provider fallback.
+
+        ProviderAuthError / ProviderCapabilityError are never fallback-eligible
+        (configuration issues). ProviderRequestError is eligible only when its
+        ``retryable`` flag is True (set by pydantic-ai wrappers for 5xx /
+        timeouts / connection failures). Other exceptions match
+        RETRYABLE_EXCEPTIONS (ModelHTTPError, TimeoutError, etc.).
+        """
+        from nextract.core.exceptions import (
+            ProviderAuthError,
+            ProviderCapabilityError,
+            ProviderRequestError,
+        )
+
+        if isinstance(exc, (ProviderAuthError, ProviderCapabilityError)):
+            return False
+        if isinstance(exc, ProviderRequestError):
+            return bool(getattr(exc, "retryable", False))
+        return isinstance(exc, self._get_retryable_exceptions())
+
     def _safe_generate(self, provider: "BaseProvider", request: "ProviderRequest") -> "ProviderResponse":
         """Generate with fallback provider support.
 
@@ -66,8 +87,10 @@ class FallbackMixin:
         """
         try:
             return provider.generate(request)
-        except self._get_retryable_exceptions() as exc:
-            return self._try_fallback(request, exc)
+        except Exception as exc:
+            if self._is_fallback_eligible(exc):
+                return self._try_fallback(request, exc)
+            raise
 
     def _try_fallback(self, request: "ProviderRequest", exc: Exception) -> "ProviderResponse":
         """Attempt to use fallback provider if configured.

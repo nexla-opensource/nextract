@@ -228,12 +228,12 @@ Templates are provided:
 - Provider implementations may use async clients (pydantic-ai supports async)
 
 ### Configuration and Environment
-Environment variables (prefer config objects):
-- `NEXTRACT_MODEL`: Default model
-- `NEXTRACT_MAX_CONCURRENCY`: Max concurrent requests
-- `NEXTRACT_MAX_RUN_RETRIES`: Retry attempts
-- `NEXTRACT_PER_CALL_TIMEOUT_SECS`: Request timeout
-- `NEXTRACT_PRICING`: Pricing configuration
+Prefer `ExtractionPlan` / `ProviderConfig` / `ExtractorConfig` / `ChunkerConfig` for the public pipeline path.
+Environment variables:
+- `NEXTRACT_PRICING`: Optional pricing map for pipeline cost estimates
+- Legacy `RuntimeConfig` only (agent_runner / adaptive / field_chunking — not `ExtractionPipeline`):
+  - `NEXTRACT_MODEL`, `NEXTRACT_MAX_CONCURRENCY`, `NEXTRACT_MAX_RUN_RETRIES`,
+    `NEXTRACT_PER_CALL_TIMEOUT_SECS`, multipass/provenance flags
 
 ### Provider-Specific Notes
 - Most LLM providers are thin wrappers around pydantic-ai

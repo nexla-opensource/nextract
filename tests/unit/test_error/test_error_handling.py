@@ -191,7 +191,6 @@ class TestMultiPassErrorHandling:
         failed_passes = [p for p in result.pass_results if p.errors]
         assert len(failed_passes) == 2
     
-    @pytest.mark.skip(reason="Implementation pending: fail_threshold error handling")
     @pytest.mark.asyncio
     async def test_fail_threshold_exceeded_error(self):
         """Test informative error when fail_threshold is exceeded"""
@@ -231,7 +230,9 @@ class TestMultiPassErrorHandling:
         
         # Should include error details
         assert exc_info.value.failed_count == 2
+        assert exc_info.value.failed_passes == 2
         assert len(exc_info.value.errors) == 2
+        assert any("Pass 2 failed" in e for e in exc_info.value.errors)
     
     @pytest.mark.skip(reason="Implementation pending: error details preservation")
     @pytest.mark.asyncio

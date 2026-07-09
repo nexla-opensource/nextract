@@ -32,7 +32,11 @@ class TestProviderConfig:
         """Check default values."""
         config = ProviderConfig(name="openai", model="gpt-4o")
         assert config.timeout == 60
-        assert config.max_retries == 3
+        # None means inherit from ExtractionPlan at validate time.
+        assert config.max_retries is None
+        assert config.backoff_factor is None
+        assert config.resolved_max_retries() == 3
+        assert config.resolved_backoff_factor() == 2.0
         assert config.temperature == 0.0
         assert config.api_key is None
         assert config.api_base is None
@@ -212,7 +216,7 @@ class TestExtractionPlan:
         )
         assert plan.num_passes == 1
         assert plan.include_confidence is True
-        assert plan.include_citations is True
+        assert plan.include_citations is False
         assert plan.retry_on_failure is True
         assert plan.max_retries == 3
         assert plan.backoff_factor == 2.0

@@ -12,7 +12,15 @@ from nextract.registry import register_chunker
 
 @register_chunker("hybrid")
 class HybridChunker(BaseChunker):
-    """Hybrid chunker that combines visual and text chunks when possible."""
+    """Hybrid chunker that emits visual and text chunks for dual-modality extractors.
+
+    For PDFs and images, both page-based visual chunks and semantic text chunks are
+    produced so a hybrid extractor can consume either or both modalities. Chunks are
+    tagged with ``hybrid_source`` (``"visual"`` | ``"text"``) and ``hybrid_order``.
+
+    For other document types (plain text, Office without a visual path here, etc.),
+    only text chunks are emitted. Audio/video use media passthrough.
+    """
 
     def __init__(self) -> None:
         self._page_chunker = PageBasedChunker()

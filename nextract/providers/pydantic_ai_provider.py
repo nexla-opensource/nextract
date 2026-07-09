@@ -12,6 +12,8 @@ from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from nextract.core import BaseProvider, ProviderConfig, ProviderRequest, ProviderResponse
 from nextract.core.exceptions import ProviderAuthError, ProviderRequestError
 from nextract.core.model_capabilities import get_model_capability
+# Canonical map lives in nextract.credentials (shared with early CLI/SDK checks).
+from nextract.credentials import PROVIDER_REQUIRED_ENV
 from nextract.schema import prepare_output_schema
 
 from nextract.providers.ocr_utils import infer_image_media_type
@@ -30,20 +32,6 @@ PROVIDER_PREFIX_MAP: dict[str, str] = {
     "aws": "bedrock",
     "bedrock": "bedrock",
     "local": "ollama",
-}
-
-# Maps nextract provider names to required environment variables.
-# Providers requiring ALL listed env vars use all(); others use any().
-PROVIDER_REQUIRED_ENV: dict[str, dict[str, list[str]]] = {
-    "openai": {"any": ["OPENAI_API_KEY"]},
-    "anthropic": {"any": ["ANTHROPIC_API_KEY"]},
-    "google": {"any": ["GOOGLE_API_KEY"]},
-    "google-vertex": {"all": ["GOOGLE_API_KEY"]},
-    "azure": {"all": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"]},
-    "cohere": {"any": ["CO_API_KEY"]},
-    "aws": {"all": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
-    "bedrock": {"all": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]},
-    "local": {"any": []},
 }
 
 # OCR providers that bypass the LLM model capability table
@@ -160,7 +148,8 @@ class PydanticAIProvider(BaseProvider):
         result = self._run_with_retries_sync(
             agent,
             parts,
-            max_attempts=self.config.max_retries,
+            max_attempts=self.config.resolved_max_retries(),
+            backoff_factor=self.config.resolved_backoff_factor(),
         )
 
         usage = result.usage()
@@ -287,14 +276,25 @@ class PydanticAIProvider(BaseProvider):
         agent: Agent,
         parts: list[str | BinaryContent],
         max_attempts: int,
+        backoff_factor: float = 2.0,
     ):
-        """Run agent with sync retries using pydantic-ai's run_sync method."""
+        """Run agent with sync retries using pydantic-ai's run_sync method.
+
+        ``max_attempts`` and ``backoff_factor`` come from
+        :class:`~nextract.core.config.ProviderConfig` (often filled from
+        :class:`~nextract.core.config.ExtractionPlan` when unset).
+
+        Note: ``Agent(retries=…)`` below is pydantic-ai's *output-validation*
+        retry budget and is separate from this transport-level tenacity loop.
+        """
         usage_limits = self._build_usage_limits(max_attempts)
+        # Cap wait so backoff_factor scales initial delay without unbounded sleeps.
+        max_wait = max(10.0, float(backoff_factor) * 5.0)
 
         retrying = Retrying(
             reraise=True,
             stop=stop_after_attempt(max_attempts),
-            wait=wait_random_exponential(multiplier=1, max=10),
+            wait=wait_random_exponential(multiplier=float(backoff_factor), max=max_wait),
             retry=retry_if_exception_type(
                 (ModelHTTPError, TimeoutError, ConnectionError, OSError, UnexpectedModelBehavior)
             ),

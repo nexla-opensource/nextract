@@ -2,7 +2,10 @@
 
 ## Project Structure & Modules
 - `nextract/`: core library and CLI
-  - `core.py` (public API: `extract`, `batch_extract`), `agent_runner.py` (agent wiring), `files.py` (file handling), `schema.py` (JSON Schema/Pydantic utils), `pricing.py`, `config.py`, `prompts.py`, `logging.py`, `cli.py` (Typer app)
+  - Public API: `nextract/__init__.py` (`extract`, `extract_simple`, `batch_extract`, plan configs, exceptions)
+  - `nextract/cli/`: Typer CLI package (`main.py` entry, `commands/` for extract, batch, list, convert, validate-config, etc.)
+  - `nextract/core/`: base types, configs, exceptions, artifacts
+  - `nextract/pipeline/`, `extractors/`, `providers/`, `chunking/`, `registry/`, …
 - `usage/`: runnable examples (e.g., `python usage/pydantic_usage.py`)
 - `pyproject.toml`: packaging, deps, console script `nextract`
 - `dist/`: build artifacts (wheel/sdist)
@@ -37,7 +40,8 @@
 
 ## Security & Configuration Tips
 - Do not commit secrets. Use environment variables; `.env` is for local only. Mirror new keys in `.env.example`.
-- Key envs: `NEXTRACT_MODEL`, `NEXTRACT_MAX_CONCURRENCY`, `NEXTRACT_MAX_RUN_RETRIES`, `NEXTRACT_PER_CALL_TIMEOUT_SECS`, `NEXTRACT_PRICING`.
+- Key envs for the public pipeline path: `NEXTRACT_PRICING` (cost estimate). Prefer `ExtractionPlan` / `ProviderConfig` for retries, timeouts, multipass.
+- Legacy-only envs (`RuntimeConfig` / agent_runner): `NEXTRACT_MODEL`, `NEXTRACT_MAX_CONCURRENCY`, `NEXTRACT_MAX_RUN_RETRIES`, `NEXTRACT_PER_CALL_TIMEOUT_SECS`, multipass/provenance flags.
 - Office→PDF conversion requires system tools (`soffice`/LibreOffice or `unoconv`) if you touch those paths.
 
 ## Agent‑Specific Notes

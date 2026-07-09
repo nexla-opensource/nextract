@@ -18,6 +18,9 @@ PROVIDER_DEFAULT_MODELS = {
     "local": "llama3",
     "cohere": "command-r-plus",
     "textract": "default",
+    "tesseract": "default",
+    "easyocr": "default",
+    "paddleocr": "default",
 }
 
 DEFAULT_MAX_CONCURRENCY = int(os.getenv("NEXTRACT_MAX_CONCURRENCY", "4"))
@@ -42,6 +45,13 @@ NEXTRACT_PRICING_JSON = os.getenv("NEXTRACT_PRICING", "")
 
 @dataclass(frozen=True)
 class RuntimeConfig:
+    """Legacy runtime settings (agent_runner / adaptive / field_chunking).
+
+    The public SDK/CLI path uses :class:`~nextract.core.config.ExtractionPlan`
+    and does **not** read these env-backed fields. Prefer plan/provider config
+    for new code.
+    """
+
     model: str = DEFAULT_MODEL
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY
     max_run_retries: int = DEFAULT_MAX_RUN_RETRIES

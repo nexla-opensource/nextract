@@ -28,7 +28,9 @@ from .exceptions import (
     NextractError,
     PipelineError,
     PlanError,
+    ProviderAuthError,
     ProviderError,
+    ProviderRequestError,
     ValidationError,
 )
 from .model_capabilities import (
@@ -36,6 +38,7 @@ from .model_capabilities import (
     get_model_capabilities,
     register_model_capability,
     reset_model_capabilities,
+    restore_model_capabilities,
     snapshot_model_capabilities,
 )
 
@@ -70,11 +73,14 @@ __all__ = [
     "NextractError",
     "PipelineError",
     "PlanError",
+    "ProviderAuthError",
     "ProviderError",
+    "ProviderRequestError",
     "ValidationError",
     "get_model_capability",
     "get_model_capabilities",
     "register_model_capability",
     "reset_model_capabilities",
+    "restore_model_capabilities",
     "snapshot_model_capabilities",
 ]

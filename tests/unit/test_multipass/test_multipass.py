@@ -32,11 +32,15 @@ class TestMultiPassExtractor:
         with pytest.raises(ValueError, match="num_passes must be >= 1"):
             MultiPassExtractor(num_passes=0)
     
-    @pytest.mark.skip(reason="Implementation pending: fail_threshold validation")
     def test_initialization_invalid_fail_threshold(self):
         """Test initialization with invalid fail_threshold"""
         with pytest.raises(ValueError, match="fail_threshold must be >= 0"):
             MultiPassExtractor(num_passes=3, fail_threshold=-1)
+
+    def test_initialization_fail_threshold_zero(self):
+        """fail_threshold=0 is valid (zero-tolerance multipass)"""
+        extractor = MultiPassExtractor(num_passes=3, fail_threshold=0)
+        assert extractor.fail_threshold == 0
     
     @pytest.mark.asyncio
     async def test_extract_multipass_union_strategy(self):
@@ -120,7 +124,6 @@ class TestMultiPassExtractor:
         assert "field2" not in result.merged_data
         assert "field3" not in result.merged_data
     
-    @pytest.mark.skip(reason="Implementation pending: majority merge strategy")
     @pytest.mark.asyncio
     async def test_extract_multipass_majority_strategy(self):
         """Test multi-pass extraction with majority merge strategy"""
@@ -137,7 +140,7 @@ class TestMultiPassExtractor:
             if call_count <= 4:
                 data = {"field1": "value1"}
             else:
-                data = {"field2": "value2"}
+                data = {}
             
             if call_count in [1, 3]:
                 data["field2"] = "value2"
@@ -162,40 +165,64 @@ class TestMultiPassExtractor:
         # field2 should not be present (2/5 = 40% < 50%)
         assert "field2" not in result.merged_data
     
-    @pytest.mark.skip(reason="Implementation pending: highest_confidence merge strategy")
     @pytest.mark.asyncio
-    async def test_extract_multipass_highest_confidence_strategy(self):
-        """Test multi-pass extraction with highest_confidence merge strategy"""
-        extractor = MultiPassExtractor(num_passes=3)
-        
+    async def test_extract_multipass_highest_confidence_raises(self):
+        """highest_confidence must fail loudly before any extraction work."""
+        extractor = MultiPassExtractor(num_passes=2)
+        calls = {"n": 0}
+
+        async def mock_extraction(**kwargs):
+            calls["n"] += 1
+            return (
+                {"field1": "value"},
+                {
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                    "cost_estimate_usd": 0.01,
+                    "warnings": [],
+                },
+            )
+
+        schema = {"type": "object", "properties": {"field1": {"type": "string"}}}
+
+        with pytest.raises(NotImplementedError, match="highest_confidence"):
+            await extractor.extract_multipass(
+                extraction_fn=mock_extraction,
+                schema=schema,
+                merge_strategy="highest_confidence",
+            )
+        assert calls["n"] == 0
+
+    @pytest.mark.asyncio
+    async def test_extract_multipass_union_keeps_scalar_values(self):
+        """Union strategy must not list-wrap non-list scalar field values"""
+        extractor = MultiPassExtractor(num_passes=2)
+
         call_count = 0
-        
+
         async def mock_extraction(**kwargs):
             nonlocal call_count
             call_count += 1
-            
-            # Each pass has different confidence
-            data = {
-                "field1": f"value_{call_count}",
-                "_confidence": 0.5 + (call_count * 0.1)  # 0.6, 0.7, 0.8
-            }
-            
+            if call_count == 1:
+                data = {"name": "Alice", "tags": ["a"]}
+            else:
+                data = {"name": "Bob", "tags": ["b"]}
             return data, {
-                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
-                "cost_estimate_usd": 0.01,
-                "warnings": []
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                "cost_estimate_usd": 0.0,
+                "warnings": [],
             }
-        
-        schema = {"type": "object", "properties": {}}
-        
+
         result = await extractor.extract_multipass(
             extraction_fn=mock_extraction,
-            schema=schema,
-            merge_strategy="highest_confidence"
+            schema={"type": "object", "properties": {}},
+            merge_strategy="union",
         )
-        
-        # Should use data from pass 3 (highest confidence = 0.8)
-        assert result.merged_data["field1"] == "value_3"
+
+        # Scalar: first non-empty value, not ["Alice"] / ["Alice", "Bob"]
+        assert result.merged_data["name"] == "Alice"
+        assert isinstance(result.merged_data["name"], str)
+        # Lists: still merged by extend
+        assert result.merged_data["tags"] == ["a", "b"]
     
     @pytest.mark.asyncio
     async def test_extract_multipass_first_non_empty_strategy(self):
@@ -272,7 +299,6 @@ class TestMultiPassExtractor:
         # Should still have data from successful passes
         assert "field1" in result.merged_data
     
-    @pytest.mark.skip(reason="Implementation pending: fail_threshold enforcement")
     @pytest.mark.asyncio
     async def test_extract_multipass_exceeds_fail_threshold(self):
         """Test multi-pass extraction that exceeds fail_threshold"""
@@ -307,7 +333,6 @@ class TestMultiPassExtractor:
         assert "3 failed" in str(exc_info.value)
         assert "threshold: 2" in str(exc_info.value)
     
-    @pytest.mark.skip(reason="Implementation pending: usage aggregation")
     @pytest.mark.asyncio
     async def test_extract_multipass_usage_aggregation(self):
         """Test that usage is correctly aggregated across passes"""
@@ -328,9 +353,12 @@ class TestMultiPassExtractor:
             merge_strategy="union"
         )
         
-        # Should aggregate usage from all 3 passes
+        # Should aggregate usage from all 3 passes (prompt/completion keys)
         assert result.total_usage["prompt_tokens"] == 300  # 100 * 3
         assert result.total_usage["completion_tokens"] == 150  # 50 * 3
+        # Normalized aliases also present
+        assert result.total_usage["input_tokens"] == 300
+        assert result.total_usage["output_tokens"] == 150
         assert result.total_cost == pytest.approx(0.03)  # 0.01 * 3
     
     @pytest.mark.asyncio

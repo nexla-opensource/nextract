@@ -23,6 +23,7 @@ TMP_ROOT = Path(tempfile.gettempdir())
 _MAX_ZIP_MEMBERS = 500
 _MAX_ZIP_MEMBER_BYTES = 100 * 1024 * 1024  # 100 MB per member
 _MAX_ZIP_TOTAL_BYTES = 500 * 1024 * 1024   # 500 MB total
+_CONVERSION_TIMEOUT_SECS = 120
 
 @dataclass
 class PreparedPart:
@@ -212,7 +213,13 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
                     str(out_dir),
                     str(path),
                 ]
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                res = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=_CONVERSION_TIMEOUT_SECS,
+                )
                 # Find produced CSV (same stem or similar)
                 produced = list(out_dir.glob("*.csv"))
                 if produced:
@@ -229,6 +236,13 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
                         stderr=res.stderr.decode(errors="ignore"),
                         file=str(path),
                     )
+            except subprocess.TimeoutExpired:
+                log.warning(
+                    "xls_csv_timeout",
+                    tool="soffice",
+                    timeout=_CONVERSION_TIMEOUT_SECS,
+                    file=str(path),
+                )
             except Exception as e:  # noqa: BLE001
                 log.debug("xls_csv_exception", tool="soffice", error=str(e), file=str(path))
 
@@ -236,7 +250,13 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
         if unoconv:
             try:
                 cmd = [unoconv, "-f", "csv", "-o", str(out_dir), str(path)]
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                res = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=_CONVERSION_TIMEOUT_SECS,
+                )
                 produced = list(out_dir.glob("*.csv"))
                 if produced:
                     try:
@@ -252,6 +272,13 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
                         stderr=res.stderr.decode(errors="ignore"),
                         file=str(path),
                     )
+            except subprocess.TimeoutExpired:
+                log.warning(
+                    "xls_csv_timeout",
+                    tool="unoconv",
+                    timeout=_CONVERSION_TIMEOUT_SECS,
+                    file=str(path),
+                )
             except Exception as e:  # noqa: BLE001
                 log.debug("xls_csv_exception", tool="unoconv", error=str(e), file=str(path))
         return None
@@ -259,34 +286,59 @@ def _xls_to_text_via_cli(path: Path) -> str | None:
         # Clean up temp directory after reading CSV content into memory
         shutil.rmtree(out_dir, ignore_errors=True)
 
+def _prepare_spreadsheet(path: Path) -> list[PreparedPart] | None:
+    """Extract spreadsheet content as text when extension is .xlsx/.xls.
+
+    Returns PreparedPart list on success path, or None if not a spreadsheet.
+    .xlsx/.xls are office binaries in mimetypes_map, so this must run before
+    the office→PDF conversion branch.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".xlsx":
+        try:
+            text = _xlsx_to_text(path)
+        except Exception as e:  # noqa: BLE001
+            log.debug("xlsx_text_extraction_failed", file=str(path), error=str(e))
+            # Fallback to raw bytes decode (not ideal)
+            text = _read_text_file(path)
+        return [
+            PreparedPart(
+                text=_wrap_text_payload(path, text, "text/tab-separated-values"),
+                source_path=path,
+            )
+        ]
+    if suffix == ".xls":
+        # Prefer CLI-based CSV extraction; fallback to raw decode
+        text_cli = _xls_to_text_via_cli(path)
+        if text_cli is not None:
+            return [
+                PreparedPart(
+                    text=_wrap_text_payload(path, text_cli, "text/csv"),
+                    source_path=path,
+                )
+            ]
+        log.debug("xls_text_extraction_fallback_raw_decode", file=str(path))
+        text = _read_text_file(path)
+        return [
+            PreparedPart(
+                text=_wrap_text_payload(path, text, "text/plain"),
+                source_path=path,
+            )
+        ]
+    return None
+
+
 def _prepare_single_file(path: Path) -> list[PreparedPart]:
     parts: list[PreparedPart] = []
     mime = guess_mime(path)
 
-    if is_textual(path):
-        # Special handling for Excel files to extract textual content
-        if path.suffix.lower() in {".xlsx"}:
-            try:
-                text = _xlsx_to_text(path)
-            except Exception as e:  # noqa: BLE001
-                log.debug("xlsx_text_extraction_failed", file=str(path), error=str(e))
-                # Fallback to raw bytes decode (not ideal)
-                text = _read_text_file(path)
-            parts.append(PreparedPart(text=_wrap_text_payload(path, text, "text/tab-separated-values"), source_path=path))
-            return parts
-        elif path.suffix.lower() in {".xls"}:
-            # Prefer CLI-based CSV extraction; fallback to raw decode
-            text_cli = _xls_to_text_via_cli(path)
-            if text_cli is not None:
-                parts.append(PreparedPart(text=_wrap_text_payload(path, text_cli, "text/csv"), source_path=path))
-                return parts
-            else:
-                # Last resort: attempt a lossy decode
-                log.debug("xls_text_extraction_fallback_raw_decode", file=str(path))
-                text = _read_text_file(path)
-                parts.append(PreparedPart(text=_wrap_text_payload(path, text, "text/plain"), source_path=path))
-                return parts
+    # Spreadsheets: dedicated text extraction (not office→PDF).
+    # These extensions are classified as office binary, so handle them first.
+    spreadsheet_parts = _prepare_spreadsheet(path)
+    if spreadsheet_parts is not None:
+        return spreadsheet_parts
 
+    if is_textual(path):
         text = _read_text_file(path)
         parts.append(PreparedPart(text=_wrap_text_payload(path, text, mime), source_path=path))
         return parts

@@ -129,6 +129,55 @@ class TestWrapTextPayload:
         assert "test.txt" in result
 
 
+def _write_minimal_xlsx(path: Path, sheet_name: str = "Data", rows: list[list[str]] | None = None) -> None:
+    """Write a minimal OOXML spreadsheet that _xlsx_to_text can parse."""
+    rows = rows or [["Name", "Amount"], ["Widget", "42"]]
+    shared = []
+    for row in rows:
+        for cell in row:
+            if cell not in shared:
+                shared.append(cell)
+
+    def cell_ref(col_idx: int, row_idx: int) -> str:
+        # 1-based col_idx
+        col = ""
+        n = col_idx
+        while n:
+            n, rem = divmod(n - 1, 26)
+            col = chr(ord("A") + rem) + col
+        return f"{col}{row_idx}"
+
+    si_xml = "".join(f"<si><t>{s}</t></si>" for s in shared)
+    shared_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"{si_xml}</sst>"
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheets><sheet name="{sheet_name}" sheetId="1"/></sheets></workbook>'
+    )
+    row_xml_parts = []
+    for r_i, row in enumerate(rows, start=1):
+        cells = []
+        for c_i, val in enumerate(row, start=1):
+            idx = shared.index(val)
+            ref = cell_ref(c_i, r_i)
+            cells.append(f'<c r="{ref}" t="s"><v>{idx}</v></c>')
+        row_xml_parts.append(f'<row r="{r_i}">{"".join(cells)}</row>')
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(row_xml_parts)}</sheetData></worksheet>'
+    )
+
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("xl/sharedStrings.xml", shared_xml)
+        zf.writestr("xl/workbook.xml", workbook_xml)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+
+
 class TestPrepareParts:
     def test_file_not_found_raises(self):
         with pytest.raises(FileNotFoundError):
@@ -141,6 +190,50 @@ class TestPrepareParts:
         assert len(parts) == 1
         assert parts[0].text is not None
         assert "hello world" in parts[0].text
+
+    def test_xlsx_uses_text_extraction_not_office_pdf(self, tmp_path: Path, monkeypatch):
+        """Regression: .xlsx is office-binary in mimetypes but must use _xlsx_to_text."""
+        from nextract import files as files_mod
+
+        xlsx = tmp_path / "sample.xlsx"
+        _write_minimal_xlsx(xlsx, sheet_name="Sales", rows=[["Product", "Qty"], ["Gadget", "3"]])
+
+        def _boom(*_args, **_kwargs):
+            raise AssertionError("office→PDF path must not run for .xlsx")
+
+        monkeypatch.setattr(files_mod, "_convert_office_to_pdf", _boom)
+
+        parts = prepare_parts([str(xlsx)])
+        assert len(parts) == 1
+        assert parts[0].text is not None
+        assert parts[0].binary is None
+        assert "Gadget" in parts[0].text
+        assert "3" in parts[0].text
+        assert "BEGIN FILE" in parts[0].text
+
+    def test_xls_uses_cli_text_extraction_not_office_pdf(self, tmp_path: Path, monkeypatch):
+        """Regression: .xls should prefer CLI CSV text path over office→PDF."""
+        from nextract import files as files_mod
+
+        xls = tmp_path / "legacy.xls"
+        xls.write_bytes(b"not-a-real-xls")
+
+        monkeypatch.setattr(
+            files_mod,
+            "_xls_to_text_via_cli",
+            lambda _p: "col_a,col_b\nfoo,bar\n",
+        )
+
+        def _boom(*_args, **_kwargs):
+            raise AssertionError("office→PDF path must not run for .xls")
+
+        monkeypatch.setattr(files_mod, "_convert_office_to_pdf", _boom)
+
+        parts = prepare_parts([str(xls)])
+        assert len(parts) == 1
+        assert parts[0].text is not None
+        assert parts[0].binary is None
+        assert "foo,bar" in parts[0].text
 
     def test_image_file_preparation(self, tmp_path: Path):
         from PIL import Image

@@ -203,7 +203,10 @@ def _isolate_registries():
     Prevents test mutations from leaking between test cases.
     """
     from nextract.registry import ChunkerRegistry, ExtractorRegistry, ProviderRegistry
-    from nextract.core.model_capabilities import snapshot_model_capabilities, reset_model_capabilities
+    from nextract.core.model_capabilities import (
+        snapshot_model_capabilities,
+        restore_model_capabilities,
+    )
 
     extractor_snap = ExtractorRegistry.get_instance().snapshot()
     provider_snap = ProviderRegistry.get_instance().snapshot()
@@ -215,7 +218,7 @@ def _isolate_registries():
     ExtractorRegistry.get_instance().restore(extractor_snap)
     ProviderRegistry.get_instance().restore(provider_snap)
     ChunkerRegistry.get_instance().restore(chunker_snap)
-    reset_model_capabilities()
+    restore_model_capabilities(model_caps_snap)
 
     from nextract.registry.bootstrap import reset_bootstrap
     reset_bootstrap()

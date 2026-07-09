@@ -11,13 +11,17 @@ log = structlog.get_logger(__name__)
 
 @register_chunker("section")
 class SectionChunker(BaseChunker):
-    """Section-based chunker — currently delegates to SemanticChunker.
+    """Experimental/stub section-based chunker.
 
-    .. note::
-        Section-aware boundary detection is not yet implemented.
-        This chunker is functionally identical to ``semantic``.
-        A future release will add heading/section-break detection.
+    Currently delegates entirely to :class:`SemanticChunker` (sentence packing).
+    Heading/section-break detection is **not** implemented; ``preserve_sections``
+    on :class:`~nextract.core.config.ChunkerConfig` has no effect.
+
+    Listed as ``[experimental/stub]`` in CLI ``nextract list chunkers``.
+    Prefer ``semantic`` or ``fixed_size`` until section boundaries are real.
     """
+
+    _warned: bool = False
 
     def __init__(self) -> None:
         self._fallback = SemanticChunker()
@@ -30,4 +34,13 @@ class SectionChunker(BaseChunker):
         return self._fallback.validate_config(config)
 
     def chunk(self, document: DocumentArtifact, config: ChunkerConfig) -> list[TextChunk]:
+        if not SectionChunker._warned:
+            log.warning(
+                "section_chunker_experimental",
+                message=(
+                    "SectionChunker is experimental/stub and currently identical to "
+                    "semantic chunking; section-boundary detection is not implemented."
+                ),
+            )
+            SectionChunker._warned = True
         return self._fallback.chunk(document, config)

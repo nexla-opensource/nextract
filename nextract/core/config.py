@@ -24,14 +24,20 @@ def _mask_extra_params(extra_params: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class ProviderConfig:
-    """Configuration for a specific provider."""
+    """Configuration for a specific provider.
+
+    ``max_retries`` / ``backoff_factor`` default to ``None`` (inherit from
+    :class:`ExtractionPlan` at plan validation time). When set explicitly,
+    plan validation leaves them unchanged.
+    """
 
     name: str
     model: str
     api_key: str | None = field(default=None, repr=False)
     api_base: str | None = None
     timeout: int = 60
-    max_retries: int = 3
+    max_retries: int | None = None
+    backoff_factor: float | None = None
     temperature: float = 0.0
     max_tokens: int | None = None
     extra_params: dict[str, Any] = field(default_factory=dict)
@@ -41,14 +47,27 @@ class ProviderConfig:
             raise ValueError("Provider name and model are required")
         if self.temperature < 0 or self.temperature > 2:
             raise ValueError("Temperature must be between 0 and 2")
+        if self.max_retries is not None and self.max_retries < 1:
+            raise ValueError("max_retries must be >= 1 when set")
+        if self.backoff_factor is not None and self.backoff_factor < 1:
+            raise ValueError("backoff_factor must be >= 1 when set")
         return True
+
+    def resolved_max_retries(self, default: int = 3) -> int:
+        """Return max_retries, falling back to ``default`` when unset."""
+        return default if self.max_retries is None else self.max_retries
+
+    def resolved_backoff_factor(self, default: float = 2.0) -> float:
+        """Return backoff_factor, falling back to ``default`` when unset."""
+        return default if self.backoff_factor is None else self.backoff_factor
 
     def __repr__(self) -> str:
         extra = _mask_extra_params(self.extra_params)
         return (
             f"ProviderConfig(name={self.name!r}, model={self.model!r}, "
             f"api_base={self.api_base!r}, timeout={self.timeout}, "
-            f"max_retries={self.max_retries}, temperature={self.temperature}, "
+            f"max_retries={self.max_retries}, backoff_factor={self.backoff_factor}, "
+            f"temperature={self.temperature}, "
             f"max_tokens={self.max_tokens}, extra_params={extra!r})"
         )
 
@@ -136,17 +155,26 @@ class ChunkerConfig:
 class ExtractionPlan:
     """Complete extraction plan.
 
-    Retry configuration: ``max_retries`` and ``backoff_factor`` here are the
-    single source of truth for pipeline-level retries. These propagate to
-    ``ProviderConfig.max_retries`` at plan validation time if the provider
-    config does not specify an override.
+    Retry configuration: ``max_retries`` and ``backoff_factor`` are the plan-level
+    defaults. At validation time they are written onto the provider (and fallback
+    provider) **only when those fields are still ``None``** — an explicit
+    ``ProviderConfig(max_retries=…)`` / ``backoff_factor=…`` is never overwritten.
+
+    Notes on currently unused / partial flags:
+    - ``include_citations``: when True, metadata includes a ``citations`` key
+      (empty until provenance is wired). Defaults to False.
+    - ``validation_rules`` / ``auto_suggest_schema``: reserved; not applied by
+      ``ExtractionPipeline`` today.
+    - Pipeline multipass (``num_passes`` > 1) re-runs and merges via array
+      dedupe / ``merge_partial_outputs``; it does **not** use
+      ``MultiPassExtractor`` strategy names.
     """
 
     extractor: ExtractorConfig
     chunker: ChunkerConfig
     num_passes: int = 1
     include_confidence: bool = True
-    include_citations: bool = True
+    include_citations: bool = False
     include_raw_text: bool = False
     auto_suggest_schema: bool = False
     schema_validation: bool = True
@@ -165,9 +193,23 @@ class ExtractionPlan:
             raise ValueError(f"num_passes must be <= 20, got {self.num_passes}")
         if self.backoff_factor < 1:
             raise ValueError("backoff_factor must be >= 1")
+        if self.max_retries < 1:
+            raise ValueError("max_retries must be >= 1")
 
-        # Propagate max_retries to provider if not explicitly set
-        if self.retry_on_failure and self.max_retries != self.extractor.provider.max_retries:
-            self.extractor.provider.max_retries = self.max_retries
+        # Apply plan-level retry policy onto providers.
+        # - retry_on_failure=False is a plan kill-switch: force a single attempt.
+        # - Otherwise fill max_retries / backoff_factor only when the provider
+        #   left them unset (explicit provider values are never overwritten).
+        providers = [self.extractor.provider]
+        if self.extractor.fallback_provider is not None:
+            providers.append(self.extractor.fallback_provider)
+
+        for provider in providers:
+            if not self.retry_on_failure:
+                provider.max_retries = 1
+            elif provider.max_retries is None:
+                provider.max_retries = self.max_retries
+            if provider.backoff_factor is None:
+                provider.backoff_factor = self.backoff_factor
 
         return True

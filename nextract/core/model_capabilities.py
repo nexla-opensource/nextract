@@ -200,4 +200,11 @@ def reset_model_capabilities() -> None:
 def snapshot_model_capabilities() -> dict[str, dict[str, Any]]:
     """Return a copy of current model capabilities for test restore."""
     with _LOCK:
-        return dict(_MODEL_CAPABILITIES)
+        return {k: dict(v) for k, v in _MODEL_CAPABILITIES.items()}
+
+
+def restore_model_capabilities(snapshot: dict[str, dict[str, Any]]) -> None:
+    """Restore model capabilities from a snapshot. Primarily for test isolation."""
+    with _LOCK:
+        _MODEL_CAPABILITIES.clear()
+        _MODEL_CAPABILITIES.update({k: dict(v) for k, v in snapshot.items()})

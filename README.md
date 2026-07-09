@@ -28,6 +28,8 @@ Python 3.10+ is required.
 
 ### Simple extraction
 
+`extract_simple` uses `mode="auto"` by default: **PDFs and images use visual (VLM) extraction**; plain text files use the text extractor. Pass `mode="text"` to force text-only.
+
 ```python
 from nextract import extract_simple
 
@@ -50,6 +52,8 @@ result = extract_simple(
 )
 
 print(result.data)
+# Metadata includes both "provider" and "provider_name"
+print(result.metadata.get("provider_name"))
 ```
 
 ### Full control with an extraction plan
@@ -87,11 +91,16 @@ print(result.data)
 
 ## CLI
 
+Structured logs go to **stderr** so JSON on stdout stays pipe-friendly. Use `nextract --version` / `-V` for the package version.
+
 ```bash
-# Extract with defaults
+# Version
+nextract --version
+
+# Extract (default extractor: auto — PDF/images→vlm, text files→text)
 nextract extract invoice.pdf --schema schema.json --provider openai
 
-# Explicit extractor and chunker
+# Explicit extractor/chunker (omit --chunker to auto-select by modality)
 nextract extract contract.pdf \
   --schema contract_schema.json \
   --extractor vlm \
@@ -100,32 +109,69 @@ nextract extract contract.pdf \
   --chunker page \
   --pages-per-chunk 3
 
-# List available extractors and chunkers
+# Batch extract (default extractor: auto; exits 1 if any document fails)
+nextract batch doc1.pdf doc2.pdf --schema schema.json --provider openai
+
+# List extractors, providers, chunkers
 nextract list extractors
-nextract list chunkers --extractor text
+nextract list providers
+nextract list chunkers --extractor vlm   # marks section/table_aware as experimental
 
-# Check provider capabilities
+# Check provider capabilities (and required credentials)
 nextract check-provider openai --model gpt-4o
+nextract check-provider openai --smoke   # optional connectivity probe
 
-# Convert a document to Markdown or HTML
+# Convert: extracts text, then formats it (not layout-preserving conversion)
 nextract convert docs/report.pdf --format markdown
 
 # Suggest a schema from samples
 nextract suggest-schema sample1.pdf sample2.pdf --prompt "Extract vendor and totals"
 
-# Validate a plan file
+# Validate a plan file (exits 1 if invalid)
 nextract validate-config plan.json
 ```
 
+### CLI defaults and behavior
+
+| Topic | Behavior |
+|-------|----------|
+| Default extractor | `auto` (PDF/images → `vlm`, text files → `text`). Override with `--extractor`. Mixed-type batches must set `--extractor` explicitly. |
+| Auto-chunker | If `--chunker` is omitted: `page` for vlm/ocr/textract, `semantic` for text/llamaindex, `hybrid` for hybrid. |
+| `batch` exit code | Non-zero if any document fails. |
+| `validate-config` | Prints validity; **exit code 1** when the plan is invalid. |
+| `convert` | Text extraction + format only (`markdown`, `html`, `csv`, `json`). Fails on empty text or unknown format. Not full document conversion. |
+| Logs | Structured logs on stderr; JSON results on stdout (unless `-o`). |
+
+### Credentials
+
+Set provider API keys via environment variables (or pass `api_key` in `ProviderConfig`). Missing keys produce a non-fatal warning before the run.
+
+| Provider | Env vars |
+|----------|----------|
+| openai | `OPENAI_API_KEY` |
+| anthropic | `ANTHROPIC_API_KEY` |
+| google | `GOOGLE_API_KEY` |
+| azure | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` |
+| cohere | `CO_API_KEY` |
+| bedrock / aws | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+
+`nextract check-provider <name>` reports capabilities, required env vars, and which are missing.
+
 ## Configuration
 
-Provider and extractor settings are configured via `ProviderConfig`, `ExtractorConfig`, and `ChunkerConfig`. Environment variables can also be used for runtime settings:
+Provider and extractor settings use `ProviderConfig`, `ExtractorConfig`, `ChunkerConfig`, and `ExtractionPlan` (retries, multipass, validation).
 
-- `NEXTRACT_MODEL`
-- `NEXTRACT_MAX_CONCURRENCY`
-- `NEXTRACT_MAX_RUN_RETRIES`
-- `NEXTRACT_PER_CALL_TIMEOUT_SECS`
-- `NEXTRACT_PRICING`
+Env vars used by the public pipeline path:
+
+- `NEXTRACT_PRICING` — optional cost estimate map for usage metadata
+
+Legacy `RuntimeConfig` env vars (`NEXTRACT_MODEL`, `NEXTRACT_MAX_CONCURRENCY`, `NEXTRACT_MAX_RUN_RETRIES`, `NEXTRACT_PER_CALL_TIMEOUT_SECS`, multipass/provenance flags) apply only to the older agent_runner path, not `ExtractionPipeline` / CLI extract.
+
+SDK notes:
+
+- `extract_simple(..., mode=...)` — `auto` (default), `text`, `visual`, `ocr`, `textract`, `hybrid`
+- `batch_extract(..., enable_suggestions=False)` — set `True` for post-batch schema suggestions
+- Exceptions: `NextractError`, `PipelineError`, `PlanError`, `ProviderAuthError`, `ProviderRequestError` (exported from `nextract`)
 
 ## Development
 
