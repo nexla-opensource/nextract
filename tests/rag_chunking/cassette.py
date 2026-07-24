@@ -74,17 +74,42 @@ class CassetteRecorder:
         self._inner = inner
         self._cassette_path = cassette_path
         self._entries: Dict[str, Dict[str, Any]] = {}
+        self.key_conflicts: int = 0
+
+    def _store(self, key: str, entry: Dict[str, Any]) -> None:
+        prior = self._entries.get(key)
+        if prior is not None and prior != entry:
+            # Same (method, model, payload) issued twice with a different
+            # outcome: last write wins, and replay will serve it for BOTH
+            # occurrences. Surface it so captures aren't silently lossy.
+            self.key_conflicts += 1
+            print(
+                f"    [cassette] WARNING: key conflict for {entry['method']} "
+                f"(same request, different outcome recorded twice; last wins)"
+            )
+        self._entries[key] = entry
 
     def _record(self, method: str, model: str, key: str, response) -> None:
-        self._entries[key] = {"method": method, "model": model, "response": response}
+        self._store(key, {"method": method, "model": model, "response": response})
 
     def _record_error(self, method: str, model: str, key: str, exc: BaseException) -> None:
-        self._entries[key] = {
-            "method": method,
-            "model": model,
-            "error": str(exc),
-            "error_type": type(exc).__name__,
-        }
+        self._store(
+            key,
+            {
+                "method": method,
+                "model": model,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+        )
+
+    def entry_count(self) -> int:
+        return len(self._entries)
+
+    def recorded_errors(self) -> List[Dict[str, Any]]:
+        """Entries recorded as live failures — a nonempty list means the
+        capture baked a transient failure into the baseline (degraded)."""
+        return [e for e in self._entries.values() if "error" in e]
 
     def count_tokens(self, text: str) -> int:
         model = self._inner.cfg.GEMINI_MODEL
@@ -169,6 +194,10 @@ class CassetteReplayer:
         with open(cassette_path, "r", encoding="utf-8") as f:
             self._entries: Dict[str, Dict[str, Any]] = json.load(f)
         self.cfg = cfg
+        # Every miss is tracked BEFORE raising: the pipeline's fail-open
+        # handlers swallow CassetteMiss (a KeyError subclass), so tests must
+        # assert on this list rather than relying on the exception surfacing.
+        self.misses: List[Dict[str, str]] = []
 
     def _default_model(self) -> str:
         if self.cfg is None:
@@ -181,6 +210,7 @@ class CassetteReplayer:
     def _lookup(self, method: str, key: str):
         entry = self._entries.get(key)
         if entry is None:
+            self.misses.append({"method": method, "key": key})
             raise CassetteMiss(method, key)
         if "error" in entry:
             raise RuntimeError(entry["error"])

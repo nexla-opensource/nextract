@@ -51,6 +51,50 @@ if not PAIRS:
         allow_module_level=True,
     )
 
+# The gate's membership is pinned: _discover_pairs silently drops any golden
+# missing its cassette sibling, so a refresh/merge mishap could otherwise
+# shrink the gate without failing anything.
+EXPECTED_GATE_IDS = {"tiny_csv", "tiny_xlsx", "tiny_png", "loan-extraction_pdf"}
+
+# Config reads GEMINI_* / CHUNKER_* env vars at instantiation; ambient values
+# would change replay keying or pipeline routing. Replay must be hermetic.
+CONFIG_ENV_VARS = (
+    "GEMINI_MODEL",
+    "GEMINI_LITE_MODEL",
+    "GEMINI_METADATA_MODEL",
+    "CHUNKER_USE_HEADING_DRIVEN",
+    "CHUNKER_VERIFY_CHUNKS",
+    "CHUNKER_STRUCTURED_TABLES",
+)
+
+
+def test_gate_membership():
+    actual = {g.name[: -len(".golden.json")] for g, _ in PAIRS}
+    assert actual == EXPECTED_GATE_IDS, (
+        f"parity gate membership drifted: missing={EXPECTED_GATE_IDS - actual}, "
+        f"unexpected={actual - EXPECTED_GATE_IDS} — a golden or its cassette "
+        "sibling was lost/added without updating EXPECTED_GATE_IDS"
+    )
+
+
+@pytest.mark.parametrize(
+    "cassette_path", sorted({c for _, c in PAIRS}), ids=lambda p: p.name
+)
+def test_cassettes_contain_no_recorded_failures(cassette_path):
+    """A cassette error entry means the capture baked a live failure into the
+    baseline (the pipeline fail-opens, sometimes with no row-level marker at
+    all). Shipped baselines must come from fully-healthy captures."""
+    entries = json.loads(cassette_path.read_text())
+    errors = [
+        f"{e.get('method')}({e.get('model')}): {e.get('error', '')[:100]}"
+        for e in entries.values()
+        if "error" in e
+    ]
+    assert not errors, (
+        f"{cassette_path.name} records live failures — re-capture this fixture:\n  "
+        + "\n  ".join(errors)
+    )
+
 
 def _resolve_fixture_path(recorded: str) -> Path:
     """Resolve the input-file path recorded in the golden json.
@@ -144,9 +188,14 @@ def _serialize_outputs(outputs):
     PAIRS,
     ids=[g.name[: -len(".golden.json")] for g, _ in PAIRS],
 )
-def test_parity(golden_path, cassette_path):
+def test_parity(golden_path, cassette_path, monkeypatch):
     from nextract.rag_chunking import RagDocumentChunker, Config  # noqa: F401
     from cassette import CassetteReplayer  # conftest puts the goldens dir on sys.path
+
+    # Hermetic replay: ambient env would alter Config at instantiation
+    # (model names enter cassette keys; feature toggles alter routing).
+    for var in CONFIG_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
 
     golden = json.loads(golden_path.read_text())
 
@@ -168,10 +217,21 @@ def test_parity(golden_path, cassette_path):
 
     chunker = RagDocumentChunker(api_key="cassette-replay", use_vertex=False)
     cfg = chunker._pipeline.cfg
-    chunker._pipeline.llm = CassetteReplayer(cassette_path, cfg=cfg)
+    replayer = CassetteReplayer(cassette_path, cfg=cfg)
+    chunker._pipeline.llm = replayer
 
     outputs = chunker.process_to_dataframes(str(fixture_path))
     actual_outputs = _serialize_outputs(outputs)
+
+    # Misses are swallowed by the pipeline's fail-open handlers (CassetteMiss
+    # is a KeyError), so they MUST be asserted explicitly: any miss means the
+    # port issued a request the monolith never made — prompt/routing drift —
+    # even if the output comparison below happens to pass.
+    assert not replayer.misses, (
+        f"{cassette_path.name}: {len(replayer.misses)} cassette miss(es) — the "
+        "port issued LLM requests the monolith capture never made: "
+        + "; ".join(f"{m['method']}:{m['key'][:12]}" for m in replayer.misses[:5])
+    )
 
     mismatches = []
     _compare(actual_outputs, expected_outputs, "$", mismatches)

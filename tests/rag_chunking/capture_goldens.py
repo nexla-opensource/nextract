@@ -12,8 +12,8 @@ Requires a real Gemini API key (GOOGLE_API_KEY / GEMINI_API_KEY or
 constructs without making any API calls.
 
 Example:
-    python tests/document_chunker/capture_goldens.py \
-        --api-key "$GOOGLE_API_KEY"
+    RAG_CHUNKING_MONOLITH=/path/to/chunking_code.py \
+        python tests/rag_chunking/capture_goldens.py --api-key "$GOOGLE_API_KEY"
 """
 
 import argparse
@@ -26,10 +26,18 @@ import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_MONOLITH = "/Users/tariq/Documents/tmp/chunking_code/chunking_code.py"
+# The monolith is not part of this repo; point at your local copy via env or --monolith.
+DEFAULT_MONOLITH = os.getenv("RAG_CHUNKING_MONOLITH", "")
 DEFAULT_OUT = str(HERE / "goldens")
 FIXTURES_DIR = HERE / "fixtures"
 SAMPLE_PDF = FIXTURES_DIR / "loan-extraction.pdf"
+
+# Capture-only timeout headroom: transient live timeouts (e.g. a slow
+# structured-tables batch) would otherwise fail-open into silently degraded
+# goldens. Timeouts never enter cassette keys and replay ignores them, so
+# goldens captured with headroom remain valid under the package defaults.
+CAPTURE_TIMEOUT_STANDARD = 300
+CAPTURE_TIMEOUT_LARGE = 600
 
 
 def parse_args(argv=None):
@@ -39,7 +47,8 @@ def parse_args(argv=None):
     p.add_argument(
         "--monolith",
         default=DEFAULT_MONOLITH,
-        help=f"Path to the monolith chunking_code.py (default: {DEFAULT_MONOLITH})",
+        help="Path to the monolith chunking_code.py "
+        "(default: $RAG_CHUNKING_MONOLITH; required if the env var is unset)",
     )
     p.add_argument(
         "--out",
@@ -213,15 +222,6 @@ class _LoopChurnRetryShim:
         return getattr(self._inner, name)
 
 
-def recorded_call_count(rec):
-    """Best-effort count of LLM interactions recorded by a CassetteRecorder."""
-    for attr in ("calls", "records", "entries", "interactions", "cassette"):
-        val = getattr(rec, attr, None)
-        if isinstance(val, list):
-            return len(val)
-    return -1  # unknown; cassette API exposes no obvious list
-
-
 def main(argv=None):
     args = parse_args(argv)
 
@@ -230,8 +230,20 @@ def main(argv=None):
     else:
         api_key = resolve_api_key(args)
 
+    if not args.monolith:
+        sys.exit(
+            "ERROR: no monolith path. Set RAG_CHUNKING_MONOLITH or pass --monolith "
+            "(the production chunking_code.py is not part of this repo)."
+        )
+
     mono = load_monolith(args.monolith)
-    pipeline = mono.DocumentPipeline(mono.Config(), api_key, None)
+    cfg = mono.Config()
+    # Capture-only headroom (see module docstring constants): avoid transient
+    # timeouts fail-opening into degraded goldens. Not a behavior change for
+    # replay — timeouts never enter cassette keys.
+    cfg.GEMINI_TIMEOUT_STANDARD = max(cfg.GEMINI_TIMEOUT_STANDARD, CAPTURE_TIMEOUT_STANDARD)
+    cfg.GEMINI_TIMEOUT_LARGE = max(cfg.GEMINI_TIMEOUT_LARGE, CAPTURE_TIMEOUT_LARGE)
+    pipeline = mono.DocumentPipeline(cfg, api_key, None)
 
     if args.dry_run:
         print("DRY RUN OK")
@@ -296,18 +308,36 @@ def main(argv=None):
             )
             rec.save()
 
+            # Degraded detection, two layers:
+            # (1) golden-row markers — fail-open rows that embed error text;
+            # (2) cassette error entries — ANY recorded live failure means some
+            #     pipeline stage fail-opened (possibly with no row marker at
+            #     all, e.g. structured-tables batch failure just leaves
+            #     structured_tables empty).
             degraded = degraded_rows(outputs)
+            for err in rec.recorded_errors():
+                degraded.append(
+                    f"cassette: {err['method']} ({err['model']}) failed live: "
+                    f"{err['error'][:120]}"
+                )
             if degraded:
-                print(f"    DEGRADED golden ({len(degraded)} row(s)):")
+                print(f"    DEGRADED capture ({len(degraded)} issue(s)):")
                 for hit in degraded:
                     print(f"      - {hit}")
 
             n_rows = sum(len(o["records"]) for o in outputs.values())
-            n_calls = recorded_call_count(rec)
+            n_calls = rec.entry_count()
             status = "DEGRADED" if degraded else "ok"
             summary.append((name, status, len(outputs), n_rows, n_calls))
-            print(f"    wrote {golden_path}")
-            print(f"    wrote {cassette_path}")
+            if degraded and not args.allow_degraded:
+                # Quarantine so the parity gate's *.golden.json glob can never
+                # pick up a rejected baseline.
+                golden_path.rename(golden_path.with_suffix(".rejected.json"))
+                cassette_path.rename(cassette_path.with_suffix(".rejected.json"))
+                print("    quarantined rejected artifacts as *.rejected.json")
+            else:
+                print(f"    wrote {golden_path}")
+                print(f"    wrote {cassette_path}")
         except Exception:
             traceback.print_exc()
             summary.append((name, "FAILED", 0, 0, 0))
