@@ -55,8 +55,8 @@
             "llm_stats": {
               "file_level_stats": {
                 "input_tokens_per_file": 5619,
-                "output_tokens_per_file": 1289,
-                "total_tokens_per_file": 6908,
+                "output_tokens_per_file": 1276,
+                "total_tokens_per_file": 6895,
                 "total_llm_calls_per_file": 6
               }
             }
@@ -95,8 +95,8 @@
             "llm_stats": {
               "file_level_stats": {
                 "input_tokens_per_file": 5619,
-                "output_tokens_per_file": 1289,
-                "total_tokens_per_file": 6908,
+                "output_tokens_per_file": 1276,
+                "total_tokens_per_file": 6895,
                 "total_llm_calls_per_file": 6
               }
             }

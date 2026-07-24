@@ -9,15 +9,10 @@
     "model": "gemini-2.5-flash",
     "response": 725
   },
-  "216994c2c45dc17c56186cb4c2c21a178702838e8892891b24f67c40f7004185": {
-    "method": "count_tokens",
-    "model": "gemini-2.5-flash",
-    "response": 28
-  },
   "3220d3b0e40e37df369dcae915c2014f819171af110d5b71926aadb5441f57ff": {
     "method": "agen_text",
     "model": "gemini-2.5-flash-lite",
-    "response": "[\n  \"date\",\n  \"account\",\n  \"description\",\n  \"amount\",\n  \"balance\"\n]"
+    "response": "[\"date\", \"account\", \"description\", \"amount\", \"balance\"]"
   },
   "359305dd62c9ca003401b3e661c94fcc88233ada51346bfab55195873edff4ea": {
     "method": "agen_text",
@@ -53,6 +48,11 @@
     "method": "count_tokens",
     "model": "gemini-2.5-flash",
     "response": 477
+  },
+  "99bdad3a4de4a8758e30609a8e04be2a73dff794a586652de0e9e9e6f39170e4": {
+    "method": "count_tokens",
+    "model": "gemini-2.5-flash",
+    "response": 15
   },
   "a1735226cb9f8a404cccf40b2b972482efda533c9e35d197753c84eafd02493d": {
     "method": "count_tokens",
