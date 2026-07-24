@@ -258,6 +258,33 @@ nextract batch ./a.pdf ./b.png ./c.txt \
 
 ---
 
+## RAG chunking (`nextract.rag_chunking`)
+
+Alongside schema extraction, nextract ships `RagDocumentChunker` — a multi-format,
+production-grade chunking pipeline (ported verbatim from Nexla's production document
+transform; see `nextract/rag_chunking/PROVENANCE.md`). It ingests **PDF (including
+scanned, via Gemini vision OCR), CSV, Excel, and image files** directly and produces
+retrieval-ready chunks with rich metadata (page provenance, headings, summaries,
+freshness dates, structured tables). It is distinct from `nextract.chunking.DocumentChunker`,
+which splits large documents so extraction fits in context.
+
+```python
+from nextract import RagDocumentChunker
+
+chunker = RagDocumentChunker(api_key="your_gemini_api_key")  # or GOOGLE_API_KEY / GEMINI_API_KEY
+chunks = chunker.chunk_document("financial_report.pdf")
+for chunk in chunks:
+    print(chunk.metadata.get("page_number"), chunk.text[:80])
+```
+
+Gemini-backed (`google-genai` SDK). By default the key is treated as a Vertex AI
+Agent-Platform express-mode key (the production configuration); pass
+`use_vertex=False` for a plain Gemini Developer API key. Behavior knobs (models,
+timeouts, chunk sizes, verification budgets) live on `nextract.rag_chunking.Config`,
+passed via the `config=` parameter.
+
+---
+
 ## Configuration
 
 ### Environment variables

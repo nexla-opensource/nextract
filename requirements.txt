@@ -20,3 +20,10 @@ pytest>=7.0.0
 pytest-mock>=3.0.0
 pytest-asyncio>=0.21.0
 ruff>=0.1.0
+
+# rag_chunking subpackage (see pyproject for the pandas<3 rationale)
+google-genai>=1.0.0
+pdfplumber>=0.11.0
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0
+openpyxl>=3.1.0
