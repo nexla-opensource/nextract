@@ -27,7 +27,9 @@ jobs:
 
     - name: Lint
       run: |
-        pip install ruff
+        # Pinned minor: ruff 0.16 expanded its default rule set and flags
+        # pre-existing modules; bump deliberately with a lint-cleanup pass.
+        pip install "ruff>=0.15,<0.16"
         ruff check nextract
 
     - name: Run tests
