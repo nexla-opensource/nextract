@@ -22,6 +22,14 @@ from ``inner.cfg``; the replayer must key identically, so a ``cfg`` object
 ``CassetteReplayer`` for replay to resolve the same effective model.
 ``count_tokens`` always keys on ``cfg.GEMINI_MODEL`` (as llm.py always calls
 the API with that model).
+
+Failure recording: if the live service RAISES during capture, the exception
+message is recorded under the same key (``{"error": str(exc), "error_type": ...}``)
+and re-raised. On replay, such entries raise ``RuntimeError(error)`` — the same
+message the pipeline's fail-open error chunks embed — so captures that include
+transient live failures still replay bit-identically. (Vision failures returned
+as ``"ERROR: ..."`` sentinel STRINGS are ordinary responses and are recorded
+as such.)
 """
 
 import hashlib
@@ -55,6 +63,9 @@ class CassetteRecorder:
     ``count_tokens`` (sync) is recorded too: pipeline control flow depends on
     token counts, so replay must reproduce them exactly.
 
+    Raised exceptions are recorded (message + type) and re-raised, so replay
+    can reproduce fail-open behavior byte-for-byte.
+
     Any attribute not defined here (e.g. ``cfg``, ``client``, ``use_vertex``)
     is delegated to the wrapped ``inner`` service via ``__getattr__``.
     """
@@ -67,19 +78,35 @@ class CassetteRecorder:
     def _record(self, method: str, model: str, key: str, response) -> None:
         self._entries[key] = {"method": method, "model": model, "response": response}
 
+    def _record_error(self, method: str, model: str, key: str, exc: BaseException) -> None:
+        self._entries[key] = {
+            "method": method,
+            "model": model,
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        }
+
     def count_tokens(self, text: str) -> int:
         model = self._inner.cfg.GEMINI_MODEL
         key = _key("count_tokens", model, {"text": text})
-        response = self._inner.count_tokens(text)
+        try:
+            response = self._inner.count_tokens(text)
+        except Exception as exc:
+            self._record_error("count_tokens", model, key, exc)
+            raise
         self._record("count_tokens", model, key, response)
         return response
 
     async def agen_text(self, prompt: str, max_retries: int = 5, timeout_s: int = 180, model: Optional[str] = None) -> str:
         effective_model = model or self._inner.cfg.GEMINI_MODEL
         key = _key("agen_text", effective_model, {"prompt": prompt})
-        response = await self._inner.agen_text(
-            prompt, max_retries=max_retries, timeout_s=timeout_s, model=model
-        )
+        try:
+            response = await self._inner.agen_text(
+                prompt, max_retries=max_retries, timeout_s=timeout_s, model=model
+            )
+        except Exception as exc:
+            self._record_error("agen_text", effective_model, key, exc)
+            raise
         self._record("agen_text", effective_model, key, response)
         return response
 
@@ -90,9 +117,13 @@ class CassetteRecorder:
             effective_model,
             {"prompt": prompt, "images": _image_hashes([base64_png])},
         )
-        response = await self._inner.agen_vision(
-            prompt, base64_png, timeout_s=timeout_s, model=model
-        )
+        try:
+            response = await self._inner.agen_vision(
+                prompt, base64_png, timeout_s=timeout_s, model=model
+            )
+        except Exception as exc:
+            self._record_error("agen_vision", effective_model, key, exc)
+            raise
         self._record("agen_vision", effective_model, key, response)
         return response
 
@@ -103,9 +134,13 @@ class CassetteRecorder:
             effective_model,
             {"prompt": prompt, "images": _image_hashes(base64_pngs)},
         )
-        response = await self._inner.agen_vision_batch(
-            prompt, base64_pngs, timeout_s=timeout_s, model=model
-        )
+        try:
+            response = await self._inner.agen_vision_batch(
+                prompt, base64_pngs, timeout_s=timeout_s, model=model
+            )
+        except Exception as exc:
+            self._record_error("agen_vision_batch", effective_model, key, exc)
+            raise
         self._record("agen_vision_batch", effective_model, key, response)
         return response
 
@@ -125,6 +160,9 @@ class CassetteReplayer:
     ``cfg`` (anything exposing ``GEMINI_MODEL``) must be provided so that
     ``model or cfg.GEMINI_MODEL`` resolves to the same effective model the
     recorder used for keying. Retry/timeout kwargs are accepted and ignored.
+
+    Entries recorded as failures re-raise ``RuntimeError(error)`` with the
+    exact recorded message, reproducing fail-open error chunks byte-for-byte.
     """
 
     def __init__(self, cassette_path, cfg=None):
@@ -144,6 +182,8 @@ class CassetteReplayer:
         entry = self._entries.get(key)
         if entry is None:
             raise CassetteMiss(method, key)
+        if "error" in entry:
+            raise RuntimeError(entry["error"])
         return entry["response"]
 
     def count_tokens(self, text: str) -> int:

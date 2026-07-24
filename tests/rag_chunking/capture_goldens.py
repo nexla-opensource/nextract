@@ -56,6 +56,14 @@ def parse_args(argv=None):
         ),
     )
     p.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        default=False,
+        help="Accept goldens containing fail-open/degraded rows (error chunks, "
+        "ERROR: sentinels). By default such captures exit nonzero: degraded "
+        "goldens are a bad parity baseline — re-run the capture instead.",
+    )
+    p.add_argument(
         "--no-vertex",
         action="store_true",
         default=False,
@@ -124,6 +132,87 @@ def serialize_df(df):
     }
 
 
+DEGRADED_MARKERS = (
+    '"chunker_result": "Fail"',
+    "ERROR:",
+    "Processing failed",
+    "Event loop is closed",
+    "Cassette miss",
+)
+
+
+def degraded_rows(outputs) -> list:
+    """Rows whose serialized content shows fail-open/degraded output.
+
+    A golden containing such rows replays consistently, but it enshrines a
+    transient live failure as the parity baseline — reject by default.
+    """
+    hits = []
+    for out_name, o in outputs.items():
+        for i, record in enumerate(o["records"]):
+            blob = json.dumps(record, default=str)
+            for marker in DEGRADED_MARKERS:
+                if marker in blob:
+                    hits.append(f"{out_name} records[{i}]: contains {marker!r}")
+                    break
+    return hits
+
+
+class _LoopChurnRetryShim:
+    """Capture-only mitigation for the monolith's asyncio.run loop churn.
+
+    The pipeline's handlers call asyncio.run() repeatedly against one cached
+    genai client; its aio transport can bind to an already-closed loop, and the
+    first async call on a fresh loop then fails instantly with 'Event loop is
+    closed' (raised by agen_text; returned as an 'ERROR: ...' sentinel string
+    by the vision methods). The monolith treats this as non-retryable and
+    fail-opens a degraded row — a race we must not bake into parity goldens.
+    On that specific signature, rebuild the client and retry the call once.
+    The monolith stays verbatim; the packaged fix is tracked in the bug
+    register (retry classification + loop handling).
+    """
+
+    def __init__(self, inner, rebuild_client):
+        self._inner = inner
+        self._rebuild = rebuild_client
+
+    @staticmethod
+    def _is_loop_churn_sentinel(resp) -> bool:
+        return (
+            isinstance(resp, str)
+            and resp.startswith("ERROR:")
+            and "event loop is closed" in resp.lower()
+        )
+
+    async def _call(self, fn, *args, **kwargs):
+        try:
+            resp = await fn(*args, **kwargs)
+        except RuntimeError as exc:
+            if "event loop is closed" not in str(exc).lower():
+                raise
+            self._rebuild()
+            return await fn(*args, **kwargs)
+        if self._is_loop_churn_sentinel(resp):
+            self._rebuild()
+            return await fn(*args, **kwargs)
+        return resp
+
+    async def agen_text(self, *args, **kwargs):
+        return await self._call(self._inner.agen_text, *args, **kwargs)
+
+    async def agen_vision(self, *args, **kwargs):
+        return await self._call(self._inner.agen_vision, *args, **kwargs)
+
+    async def agen_vision_batch(self, *args, **kwargs):
+        return await self._call(self._inner.agen_vision_batch, *args, **kwargs)
+
+    def count_tokens(self, text):
+        return self._inner.count_tokens(text)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 def recorded_call_count(rec):
     """Best-effort count of LLM interactions recorded by a CassetteRecorder."""
     for attr in ("calls", "records", "entries", "interactions", "cassette"):
@@ -168,7 +257,19 @@ def main(argv=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     base_llm = pipeline.llm
-    summary = []  # (fixture_name, ok, n_outputs, n_rows, n_calls)
+
+    def _rebuild_client():
+        from google import genai
+
+        print("    [loop-churn] stale aio transport detected; rebuilding genai client, retrying once")
+        base_llm.client = (
+            genai.Client(api_key=api_key)
+            if args.no_vertex
+            else genai.Client(vertexai=True, api_key=api_key)
+        )
+
+    shimmed_llm = _LoopChurnRetryShim(base_llm, _rebuild_client)
+    summary = []  # (fixture_name, status, n_outputs, n_rows, n_calls)
     any_failed = False
 
     for fixture in fixtures:
@@ -183,7 +284,7 @@ def main(argv=None):
             if not fixture.is_file():
                 raise FileNotFoundError(f"fixture not found: {fixture}")
 
-            rec = CassetteRecorder(base_llm, cassette_path)
+            rec = CassetteRecorder(shimmed_llm, cassette_path)
             pipeline.llm = rec
 
             # process_file resets token counters internally per handler.
@@ -195,25 +296,39 @@ def main(argv=None):
             )
             rec.save()
 
+            degraded = degraded_rows(outputs)
+            if degraded:
+                print(f"    DEGRADED golden ({len(degraded)} row(s)):")
+                for hit in degraded:
+                    print(f"      - {hit}")
+
             n_rows = sum(len(o["records"]) for o in outputs.values())
             n_calls = recorded_call_count(rec)
-            summary.append((name, True, len(outputs), n_rows, n_calls))
+            status = "DEGRADED" if degraded else "ok"
+            summary.append((name, status, len(outputs), n_rows, n_calls))
             print(f"    wrote {golden_path}")
             print(f"    wrote {cassette_path}")
         except Exception:
             traceback.print_exc()
-            any_failed = True
-            summary.append((name, False, 0, 0, 0))
+            summary.append((name, "FAILED", 0, 0, 0))
         finally:
             pipeline.llm = base_llm
 
     print("\n=== Summary ===")
     print(f"{'fixture':<40} {'status':<8} {'outputs':>8} {'rows':>8} {'llm_calls':>10}")
-    for name, ok, n_outputs, n_rows, n_calls in summary:
-        status = "ok" if ok else "FAILED"
+    for name, status, n_outputs, n_rows, n_calls in summary:
         calls = "?" if n_calls < 0 else str(n_calls)
         print(f"{name:<40} {status:<8} {n_outputs:>8} {n_rows:>8} {calls:>10}")
 
+    any_failed = any(status == "FAILED" for _, status, *_ in summary)
+    any_degraded = any(status == "DEGRADED" for _, status, *_ in summary)
+    if any_degraded and not args.allow_degraded:
+        print(
+            "\nDegraded goldens detected (transient live failures baked into "
+            "outputs). Re-run the capture for those fixtures, or pass "
+            "--allow-degraded to accept them anyway."
+        )
+        return 1
     return 1 if any_failed else 0
 
 

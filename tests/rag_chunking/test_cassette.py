@@ -81,6 +81,31 @@ def test_cassette_miss_on_unknown_prompt(tmp_path):
         asyncio.run(rep.agen_vision("known prompt", "ZGlmZmVyZW50LWltYWdl"))
 
 
+class _FailingInner(_FakeInner):
+    async def agen_text(self, prompt, max_retries=5, timeout_s=180, model=None):
+        raise RuntimeError("Async Gemini call failed: Event loop is closed")
+
+
+def test_failure_recorded_and_replayed(tmp_path):
+    """Live failures are recorded and replayed with the identical message,
+    so fail-open error chunks reproduce byte-for-byte on replay."""
+    cassette_path = tmp_path / "cassette.json"
+    rec = CassetteRecorder(_FailingInner(), cassette_path)
+
+    with pytest.raises(RuntimeError) as live_exc:
+        asyncio.run(rec.agen_text("doomed prompt"))
+    rec.save()
+
+    rep = CassetteReplayer(cassette_path, cfg=_FakeCfg())
+    with pytest.raises(RuntimeError) as replay_exc:
+        asyncio.run(rep.agen_text("doomed prompt"))
+    assert str(replay_exc.value) == str(live_exc.value)
+
+    # Unknown prompts still miss rather than replaying the wrong failure.
+    with pytest.raises(CassetteMiss):
+        asyncio.run(rep.agen_text("different prompt"))
+
+
 def test_replayer_requires_cfg_for_default_model(tmp_path):
     cassette_path = tmp_path / "cassette.json"
     rec = CassetteRecorder(_FakeInner(), cassette_path)
