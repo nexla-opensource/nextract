@@ -5,6 +5,25 @@ All notable changes to nextract will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **RAG chunking subpackage** (`nextract.rag_chunking`): `RagDocumentChunker`, a
+  Gemini-backed multi-format chunker (PDF including scanned via vision OCR, CSV,
+  Excel, images) ported byte-verbatim from Nexla's production document transform
+  (see `nextract/rag_chunking/PROVENANCE.md`). Lazily exported from the package
+  root so plain `import nextract` stays lightweight.
+- Offline parity gate (`tests/rag_chunking/`): cassette record/replay of every
+  LLM interaction plus committed golden outputs — proves the port reproduces the
+  production pipeline field-for-field, runs in CI with no API key.
+- New runtime dependencies: `google-genai`, `pdfplumber`, `pandas>=2,<3`
+  (ceiling required by a `groupby().apply()` pattern whose grouping-column
+  semantics changed in pandas 3), `numpy`, `openpyxl`.
+
+### Fixed
+- CI: pinned `ruff` to the 0.15 minor — 0.16 expanded its default rule set and
+  flags pre-existing modules; unpinned installs would have failed every PR.
+
 ## [0.2.0b4] - 2025-11-26
 
 ### Added

@@ -16,6 +16,7 @@ pass ``False`` for a plain Gemini Developer API key.
 from __future__ import annotations
 
 import asyncio
+import copy
 import os
 from typing import Any, Optional
 
@@ -78,16 +79,19 @@ class RagDocumentChunker:
         )
 
     def chunk_document(
-        self, file_path: str, extra_metadata: Optional[dict] = None
+        self, file_path: str, extra_metadata: Optional[dict[str, Any]] = None
     ) -> list[Chunk]:
         """Process a single file and return its chunks.
 
         Args:
             file_path: Path to the file (PDF/CSV/Excel/image) to process.
-            extra_metadata: Optional dict merged into every chunk's metadata.
+            extra_metadata: Optional dict merged into every chunk's metadata
+                (deep-copied per chunk; keys override pipeline-produced
+                metadata of the same name, including ``output_name``).
 
         Returns:
-            List of chunks in (output_name, row-order) order.
+            Chunks in pipeline output order: outputs in the order the pipeline
+            produced them, rows in DataFrame order within each output.
         """
         _ensure_no_running_loop("chunk_document")
         meta = {"tags": {"display_path": str(file_path)}}
@@ -109,15 +113,19 @@ class RagDocumentChunker:
                     metadata[key] = value
                 metadata["output_name"] = output_name
                 if extra_metadata:
-                    metadata.update(extra_metadata)
+                    # Deep-copy per chunk: sharing references would alias
+                    # mutable values across all chunks (and the caller).
+                    metadata.update(copy.deepcopy(extra_metadata))
                 chunks.append(Chunk(text=text, metadata=metadata))
         return chunks
 
-    def chunk_documents(self, file_paths: list[str]) -> list[Chunk]:
+    def chunk_documents(
+        self, file_paths: list[str], extra_metadata: Optional[dict[str, Any]] = None
+    ) -> list[Chunk]:
         """Process multiple files and return all chunks concatenated."""
         all_chunks: list[Chunk] = []
         for file_path in file_paths:
-            all_chunks.extend(self.chunk_document(file_path))
+            all_chunks.extend(self.chunk_document(file_path, extra_metadata=extra_metadata))
         return all_chunks
 
     def process_to_dataframes(self, file_path: str) -> dict:

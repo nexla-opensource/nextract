@@ -41,6 +41,11 @@ dependencies = [
     "pandas>=2.0.0,<3.0.0",
     "numpy>=1.24.0",
     "openpyxl>=3.1.0",
+    # NOTE: rag_chunking opportunistically imports json_repair (inside
+    # try/except) for its strongest JSON-repair path and falls back to an
+    # in-package repairer when absent. Deliberately NOT declared: installing
+    # it changes which repair path runs, and parity goldens were captured
+    # without it. Revisit alongside the JSON-handling consolidation.
 ]
 
 [project.optional-dependencies]
@@ -62,6 +67,10 @@ nextract = "nextract.cli:app"
 [tool.setuptools.packages.find]
 include = ["nextract*"]
 
+[tool.setuptools.package-data]
+# Ship the provenance record every rag_chunking module header points at.
+"nextract.rag_chunking" = ["PROVENANCE.md"]
+
 [tool.setuptools.exclude-package-data]
 nextract = [".env*"]
 
@@ -69,14 +78,9 @@ nextract = [".env*"]
 # rag_chunking core modules are ported byte-verbatim from the production
 # monolith (see nextract/rag_chunking/PROVENANCE.md); style-only findings in
 # those bodies are suppressed rather than editing provenance-tracked code.
-# The facade (__init__.py) and tests are NOT exempt.
-"nextract/rag_chunking/config.py" = ["E401", "F541", "F841"]
-"nextract/rag_chunking/models.py" = ["E401", "F541", "F841"]
-"nextract/rag_chunking/chunker_utils.py" = ["E401", "F541", "F841"]
-"nextract/rag_chunking/prompts.py" = ["E401", "F541", "F841"]
-"nextract/rag_chunking/llm.py" = ["E401", "F541", "F841"]
-"nextract/rag_chunking/pdf.py" = ["E401", "F541", "F841"]
-"nextract/rag_chunking/merger.py" = ["E401", "F541", "F841"]
+# Minimal set (only rules those bodies actually trip); the facade
+# (__init__.py) and tests are NOT exempt.
+"nextract/rag_chunking/chunker_utils.py" = ["F841"]
 "nextract/rag_chunking/pipeline.py" = ["E401", "F541", "F841"]
 
 [tool.pytest.ini_options]

@@ -15,4 +15,24 @@ for the documented seam edits (see package README section / PR description).
 | `merger.py` | 1863-2042 | `a4d43154e3983721` |
 | `pipeline.py` | 2043-6189 | `8b0613d2df8e60c1` |
 
-Adaptation for nextract: modules are byte-identical to the extraction above plus three seam edits (config env reads -> instantiation time; LLM client use_vertex flag; PII log-dump removal) made during the ai-chunking port, and a header-only logging swap (stdlib logging -> structlog) for nextract conventions. Body code is otherwise untouched; sha16 hashes in the table refer to the pre-seam extraction.
+Notes on completeness and conventions:
+
+- Hashes are truncated sha256 (first 16 hex chars) of each extracted body and
+  refer to the pre-seam extraction; the seam edits below are the only body
+  deltas since. Bodies begin immediately after each module's generated header
+  (everything through the `logger = structlog.get_logger(__name__)` line; the
+  blank line after it belongs to the monolith segment).
+- Deliberately NOT ported: monolith lines 1-103 (import block, import-time
+  `logging.basicConfig(DEBUG)` + pdfminer/pdfplumber log suppression, and
+  DependencyManager runtime pip-install machinery, inert with
+  REQUIRED_PACKAGES=[]) and lines 6190-6272 (the legacy Nexla `process()`
+  entrypoint with platform credential lookup); the `RagDocumentChunker`
+  facade in `__init__.py` replaces the entrypoint, and log configuration is
+  left to the host application.
+- Adaptation for nextract: three seam edits made during the extraction
+  (config env reads moved to instantiation time via `field(default_factory)`;
+  `LLMService`/`DocumentPipeline` gained a `use_vertex` client-mode flag; the
+  `process_file` nexla_meta/tags full-dump log block — PII into logs — was
+  deleted), plus two header-only changes: the stdlib-logging -> structlog
+  logger swap and an unused-import (F401) prune. Body code is otherwise
+  byte-identical to the monolith ranges above.

@@ -22,3 +22,8 @@ def __getattr__(name):
 
         return RagDocumentChunker
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    # Keep dir()/tab-completion aware of the lazy export.
+    return sorted(set(globals()) | set(__all__))

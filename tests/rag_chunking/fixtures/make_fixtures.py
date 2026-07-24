@@ -1,7 +1,7 @@
-"""Generate small deterministic fixture files for document_chunker tests.
+"""Generate small deterministic fixture files for rag_chunking tests.
 
 Idempotent: fixed literal data only, no timestamps or randomness.
-Run: /Users/tariq/Documents/ai-chunking/.venv/bin/python make_fixtures.py
+Run: python make_fixtures.py (needs pandas, openpyxl, Pillow)
 """
 import os
 
